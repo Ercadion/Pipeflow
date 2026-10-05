@@ -12,10 +12,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -31,8 +31,10 @@ jobs:
           pip install numpy
           python android-app/core_tests/test_quick.py
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
+      # GitHub 러너(ubuntu)에는 Android SDK 가 이미 설치되어 있음 (ANDROID_HOME).
+      # 필요한 플랫폼/빌드툴은 Gradle(AGP)이 자동으로 내려받음 — 라이선스만 확인
+      - name: Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4

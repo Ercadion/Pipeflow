@@ -39,13 +39,12 @@ class OverlayImageView @JvmOverloads constructor(ctx: Context, attrs: AttributeS
     private fun toView(x: Double, y: Double): FloatArray {
         val pts = floatArrayOf(x.toFloat(), y.toFloat())
         imageMatrix.mapPoints(pts)
-        pts[0] += paddingLeft; pts[1] += paddingTop
-        return pts
+        return floatArrayOf(pts[0] + paddingLeft.toFloat(), pts[1] + paddingTop.toFloat())
     }
 
     private fun toImage(x: Float, y: Float): FloatArray {
         val inv = Matrix(); imageMatrix.invert(inv)
-        val pts = floatArrayOf(x - paddingLeft, y - paddingTop)
+        val pts = floatArrayOf(x - paddingLeft.toFloat(), y - paddingTop.toFloat())
         inv.mapPoints(pts)
         return pts
     }
