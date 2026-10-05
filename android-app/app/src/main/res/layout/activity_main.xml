@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="20dp">
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="관로 수위·유속 측정" android:textSize="22sp" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="관 끝단을 촬영해 수심과 유속(H-STIV)을 계산합니다" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="관 내경 (mm)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editDiameter" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:inputType="numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="관 두께 (mm) — 촬영되는 바깥 테두리 기준">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editWall" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:inputType="numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="관 경사 (%) — 등류 공식 유속용, 비우면 생략">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editSlope" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:inputType="numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:text="관 재질 (Manning 조도계수)" />
+        <Spinner android:id="@+id/spinMaterial" android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:text="수면 아래쪽 무늬" />
+        <Spinner android:id="@+id/spinTexture" android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:text="촬영 설정" />
+        <Spinner android:id="@+id/spinFps" android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+        <Spinner android:id="@+id/spinDuration" android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <Button android:id="@+id/btnStart" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="20dp"
+            android:text="측정 시작 (촬영)" />
+        <Button android:id="@+id/btnHistory" style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="측정 기록" />
+
+        <TextView android:id="@+id/txtInfo" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="16dp"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>

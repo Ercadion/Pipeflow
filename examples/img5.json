@@ -1,0 +1,31 @@
+{
+  "level": {
+    "depth_mm": 56.13,
+    "fill_ratio": 0.5613,
+    "diameter_mm": 100.0,
+    "method": "weak_perspective",
+    "tilt_deg": 32.59,
+    "tilt_dir_deg": 118.9,
+    "roll_deg": -8.5,
+    "ellipse": {
+      "cx": 494.092,
+      "cy": 669.521,
+      "a": 485.891,
+      "b": 409.363,
+      "phi_deg": 28.882,
+      "ratio": 0.843,
+      "tilt_deg": 32.595
+    },
+    "waterline_confidence": 0.076
+  },
+  "velocity_formula": {
+    "V_mean_mps": 0.6332,
+    "Q_Lps": 2.874,
+    "regime": "manning",
+    "Re": 67601,
+    "Fr": 0.946,
+    "hydraulic_radius_mm": 26.797,
+    "area_mm2": 4538.8,
+    "warnings": []
+  }
+}

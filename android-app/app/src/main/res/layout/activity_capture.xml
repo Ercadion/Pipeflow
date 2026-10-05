@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#000000">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_gravity="center" />
+
+    <io.github.ercadion.pipeflow.GuideOverlayView
+        android:id="@+id/guide"
+        android:layout_width="match_parent" android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:background="#AA000000"
+        android:orientation="vertical" android:padding="16dp">
+        <TextView android:id="@+id/txtStatus" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="13sp" />
+        <Button android:id="@+id/btnRecord" android:layout_width="match_parent"
+            android:layout_height="64dp" android:layout_marginTop="8dp" android:text="촬영" />
+    </LinearLayout>
+</FrameLayout>

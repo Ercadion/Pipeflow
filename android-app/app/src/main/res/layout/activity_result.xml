@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="12dp">
+
+        <io.github.ercadion.pipeflow.OverlayImageView
+            android:id="@+id/imgOverlay"
+            android:layout_width="match_parent" android:layout_height="420dp"
+            android:background="#111111" android:scaleType="fitCenter" />
+
+        <TextView android:id="@+id/txtHint" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textSize="12sp"
+            android:text="초록: 관 테두리 · 빨강: 수면선" />
+
+        <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:indeterminate="true" />
+        <TextView android:id="@+id/txtProgress" android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView android:id="@+id/txtResult" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="8dp"
+            android:textIsSelectable="true" android:textSize="15sp" />
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <Button android:id="@+id/btnEdit" style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:text="수면선 수정" />
+            <Button android:id="@+id/btnRerun" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                android:text="다시 계산" />
+        </LinearLayout>
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="자동 검출이 맞았나요? (학습 데이터로 저장됩니다)" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <Button android:id="@+id/btnGood" style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:text="맞음" />
+            <Button android:id="@+id/btnBad" style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                android:text="틀림" />
+        </LinearLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="참값 메모 (예: 자로 잰 수심 42mm, 유량계 0.31 m/s)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editNote" android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <Button android:id="@+id/btnExport" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="8dp"
+            android:text="측정 데이터 내보내기 (zip 공유)" />
+    </LinearLayout>
+</ScrollView>
