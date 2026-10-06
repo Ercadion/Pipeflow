@@ -56,6 +56,7 @@ class ResultActivity : AppCompatActivity() {
             if (img.editMode) Toast.makeText(this, "빨간 점을 끌어 수면선 양 끝을 맞추세요", Toast.LENGTH_LONG).show()
         }
         btnRerun.setOnClickListener { run(manual = img.waterline?.clone()) }
+        findViewById<Button>(R.id.btnRedetect).setOnClickListener { run(manual = null, redetect = true) }
         findViewById<Button>(R.id.btnGood).setOnClickListener { label("correct") }
         findViewById<Button>(R.id.btnBad).setOnClickListener { label("wrong") }
         findViewById<Button>(R.id.btnExport).setOnClickListener { export() }
@@ -90,7 +91,7 @@ class ResultActivity : AppCompatActivity() {
         img.setImageBitmap(bmp)
     }
 
-    private fun run(manual: DoubleArray?) {
+    private fun run(manual: DoubleArray?, redetect: Boolean = false) {
         if (running) return
         running = true
         img.editMode = false; btnEdit.text = "수면선 수정"
@@ -98,6 +99,11 @@ class ResultActivity : AppCompatActivity() {
         txtProgress.text = "계산 준비 중… (처음 실행 시 Python 로딩에 몇 초 걸림)"
         val meta = SessionStore.readJson(File(dir, "meta.json"))
         val params = meta?.optJSONObject("params") ?: Settings.load(this).toParams()
+        if (redetect) {
+            // 실시간 포착 타원을 쓰지 않고 전체 영상에서 RANSAC 으로 다시 찾기
+            params.put("use_live_ellipse", false)
+            autoWaterline = null
+        }
         if (manual != null) {
             params.put("waterline_pts", JSONArray().put(JSONArray(listOf(manual[0], manual[1])))
                 .put(JSONArray(listOf(manual[2], manual[3]))))
@@ -149,6 +155,11 @@ class ResultActivity : AppCompatActivity() {
         sb.append(String.format(Locale.US, "   계산 방식: %s · 카메라 기울기 %.1f° · 수면선 기울기 %.1f°\n",
             if (lv.optString("method") == "perspective") "완전투시(초점거리 사용)" else "약투시(근사)",
             lv.optDouble("tilt_deg"), lv.optDouble("roll_deg")))
+        sb.append("   테두리: ").append(when (lv.optString("rim_source")) {
+            "live_seed" -> "촬영 화면에서 포착한 타원을 정밀화"
+            "auto_ransac" -> "전체 영상 자동 검출"
+            else -> "이전 결과 재사용"
+        }).append("\n")
         if (lv.has("waterline_confidence"))
             sb.append(String.format(Locale.US, "   수면선 검출 신뢰도 %.2f (낮으면 수동 수정 권장)\n", lv.optDouble("waterline_confidence")))
         r.optJSONObject("velocity_stiv")?.let { s ->

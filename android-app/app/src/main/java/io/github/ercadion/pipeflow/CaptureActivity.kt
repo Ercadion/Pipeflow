@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -15,6 +16,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Range
 import android.util.Size
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -42,13 +44,23 @@ import java.io.FileOutputStream
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.abs
+import kotlin.math.acos
+import kotlin.math.asin
 import kotlin.math.atan2
+import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
- * 촬영: CameraX ImageAnalysis 로 Y(밝기) 평면을 직접 받아 저장.
- *  - 첫 프레임: 원 해상도 still.y (수위 계산용)
- *  - 모든 프레임: 2×2 평균 축소 frames.y + 실제 타임스탬프 (H-STIV 용)
- *  - 중력 센서 평균 (영상 속 수평 방향 → 수면선 탐색 범위 제한)
+ * 촬영 화면
+ *  - 미리보기 중: 저해상도(긴 변 ~320px)로 초당 ~8회 관 테두리 실시간 검출(LiveRimDetector)
+ *    → 바깥 테두리(흰색) + 관 내경(빨강) 타원을 화면에 표시, 촬영 준비 체크리스트 갱신
+ *  - 조명 버튼: 후면 플래시(토치) 켜기/끄기 (촬영 중에도 유지)
+ *  - 촬영: Y 평면 저장(still.y 원 해상도 + frames.y 2×2 축소) + 타임스탬프 + 중력 + 포착한 타원(live_ellipse)
  */
 @androidx.annotation.OptIn(markerClass = [ExperimentalCamera2Interop::class])
 class CaptureActivity : AppCompatActivity(), SensorEventListener {
@@ -56,11 +68,13 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var guide: GuideOverlayView
     private lateinit var txtStatus: TextView
     private lateinit var btnRecord: Button
+    private lateinit var btnTorch: Button
     private lateinit var executor: ExecutorService
     private lateinit var settings: Settings
     private var camera: Camera? = null
     private var provider: ProcessCameraProvider? = null
     private var fpsRange: Range<Int>? = null
+    private var torchOn = false
 
     // 녹화 상태 (analyzer 스레드에서 사용)
     @Volatile private var recording = false
@@ -74,12 +88,28 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
     private var fpsEstimate = 0.0
     private var yBuf = ByteArray(0)
     private var halfBuf = ByteArray(0)
+    private var smallBuf = ByteArray(0)
 
-    // 중력
+    // 실시간 테두리 검출 (analyzer 스레드)
+    private val detector = LiveRimDetector()
+    private var lastDetectNs = 0L
+    @Volatile private var smooth: LiveRimDetector.Ellipse? = null   // 센서 방향 원 해상도 좌표
+    private var foundStreak = 0
+    private var missStreak = 0
+    @Volatile private var locked = false
+    private var lastCoverage = 0.0
+    private var lastBrightness = 0.0
+    private var lastSharpness = 0.0
+    private var lastDetectMs = 0.0
+    private var liveEllipseAtStart: LiveRimDetector.Ellipse? = null
+    private var liveCoverageAtStart = 0.0
+
+    // 센서
     private lateinit var sensorManager: SensorManager
-    private val grav = FloatArray(3)
+    private val grav = floatArrayOf(0f, 9.8f, 0f)
     private val gravSum = DoubleArray(3)
     private var gravN = 0
+    @Volatile private var gyroMag = 0.0
 
     private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) startCamera() else { Toast.makeText(this, "카메라 권한이 필요합니다", Toast.LENGTH_LONG).show(); finish() }
@@ -92,19 +122,24 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         guide = findViewById(R.id.guide)
         txtStatus = findViewById(R.id.txtStatus)
         btnRecord = findViewById(R.id.btnRecord)
+        btnTorch = findViewById(R.id.btnTorch)
         settings = Settings.load(this)
         executor = Executors.newSingleThreadExecutor()
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         btnRecord.setOnClickListener { startRecording() }
+        btnTorch.setOnClickListener { setTorch(!torchOn) }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
             startCamera() else permLauncher.launch(Manifest.permission.CAMERA)
     }
 
     override fun onResume() {
         super.onResume()
-        val s = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
+        val g = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
             ?: sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        s?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+        g?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+        sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+        }
     }
 
     override fun onPause() {
@@ -117,16 +152,28 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         executor.shutdown()
     }
 
+    // ------------------------------------------------------------------ 센서
     override fun onSensorChanged(e: SensorEvent) {
+        if (e.sensor.type == Sensor.TYPE_GYROSCOPE) {
+            val m = sqrt((e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2]).toDouble())
+            gyroMag = 0.8 * gyroMag + 0.2 * m
+            return
+        }
         grav[0] = e.values[0]; grav[1] = e.values[1]; grav[2] = e.values[2]
         if (recording) { for (i in 0..2) gravSum[i] += grav[i].toDouble(); gravN++ }
         // 영상 속 '아래' 방향 (세로 화면, 후면 카메라): (-gx, gy)
-        val roll = Math.toDegrees(atan2(-grav[0].toDouble(), grav[1].toDouble())).toFloat()
-        guide.rollDeg = roll
+        guide.rollDeg = Math.toDegrees(atan2(-grav[0].toDouble(), grav[1].toDouble())).toFloat()
     }
 
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
 
+    /** 후면 카메라가 수평 아래로 내려다보는 각도 [°] (세로 화면 기준) */
+    private fun lookDownDeg(): Double {
+        val n = sqrt((grav[0] * grav[0] + grav[1] * grav[1] + grav[2] * grav[2]).toDouble()).coerceAtLeast(1e-6)
+        return Math.toDegrees(asin((grav[2] / n).coerceIn(-1.0, 1.0)))
+    }
+
+    // ------------------------------------------------------------------ 카메라
     private fun backCameraCharacteristics(): CameraCharacteristics? {
         val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val id = cm.cameraIdList.firstOrNull {
@@ -166,13 +213,26 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
             val analysis = ab.build().also { it.setAnalyzer(executor, ::analyze) }
             try {
                 prov.unbindAll()
-                camera = prov.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                val cam = prov.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                camera = cam
+                val hasFlash = cam.cameraInfo.hasFlashUnit()
+                btnTorch.visibility = if (hasFlash) View.VISIBLE else View.GONE
+                if (torchOn && hasFlash) cam.cameraControl.enableTorch(true)
             } catch (e: Exception) {
                 Toast.makeText(this, "카메라 시작 실패: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun setTorch(on: Boolean) {
+        val cam = camera ?: return
+        if (!cam.cameraInfo.hasFlashUnit()) return
+        cam.cameraControl.enableTorch(on)
+        torchOn = on
+        btnTorch.text = if (on) "조명 끄기" else "조명 켜기"
+    }
+
+    // ------------------------------------------------------------------ 녹화
     private fun startRecording() {
         if (recording) return
         val dir = SessionStore.newSession(this)
@@ -181,10 +241,30 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         timestamps.clear(); stillW = 0
         for (i in 0..2) gravSum[i] = 0.0
         gravN = 0; startNs = 0L
+        liveEllipseAtStart = if (locked) smooth else null
+        liveCoverageAtStart = lastCoverage
         recording = true
-        guide.recording = true
+        guide.state = GuideOverlayView.State.RECORDING
         btnRecord.isEnabled = false
         btnRecord.text = "촬영 중…"
+    }
+
+    /** Y 평면을 yBuf 로 복사 (rowStride 패딩 제거) */
+    private fun copyY(image: ImageProxy) {
+        val w = image.width; val h = image.height
+        val plane = image.planes[0]
+        val buf = plane.buffer
+        val rs = plane.rowStride; val ps = plane.pixelStride
+        if (yBuf.size != w * h) yBuf = ByteArray(w * h)
+        buf.rewind()
+        if (ps == 1) {
+            for (y in 0 until h) {
+                buf.position(y * rs)
+                buf.get(yBuf, y * w, w)
+            }
+        } else {
+            for (y in 0 until h) for (x in 0 until w) yBuf[y * w + x] = buf.get(y * rs + x * ps)
+        }
     }
 
     /** analyzer 스레드 */
@@ -196,27 +276,19 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
                 fpsEstimate = if (fpsEstimate == 0.0) inst else 0.9 * fpsEstimate + 0.1 * inst
             }
             lastTs = ts
+            rotation = image.imageInfo.rotationDegrees
             if (!recording) {
-                if ((ts / 1_000_000) % 10 < 2) runOnUiThread { updateStatus(image.width, image.height) }
+                if (ts - lastDetectNs >= 120_000_000L) {      // 초당 ~8회
+                    lastDetectNs = ts
+                    copyY(image)
+                    liveDetect(image.width, image.height)
+                }
                 return
             }
+            copyY(image)
             val w = image.width; val h = image.height
-            val plane = image.planes[0]
-            val buf = plane.buffer
-            val rs = plane.rowStride; val ps = plane.pixelStride
-            if (yBuf.size != w * h) yBuf = ByteArray(w * h)
-            // 행 단위 복사 (rowStride 패딩 제거)
-            buf.rewind()
-            if (ps == 1) {
-                for (y in 0 until h) {
-                    buf.position(y * rs)
-                    buf.get(yBuf, y * w, w)
-                }
-            } else {
-                for (y in 0 until h) for (x in 0 until w) yBuf[y * w + x] = buf.get(y * rs + x * ps)
-            }
             if (stillW == 0) {
-                stillW = w; stillH = h; rotation = image.imageInfo.rotationDegrees
+                stillW = w; stillH = h
                 File(sessionDir, "still.y").writeBytes(yBuf)
                 startNs = ts
             }
@@ -242,18 +314,144 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
             }
             if (elapsed >= settings.durationSec) finishRecording()
         } catch (e: Exception) {
-            runOnUiThread { Toast.makeText(this, "프레임 저장 오류: ${e.message}", Toast.LENGTH_LONG).show() }
+            runOnUiThread { Toast.makeText(this, "프레임 처리 오류: ${e.message}", Toast.LENGTH_LONG).show() }
         } finally {
             image.close()
         }
     }
 
-    private fun updateStatus(w: Int, h: Int) {
-        txtStatus.text = String.format(Locale.US,
-            "분석 해상도 %d×%d · 실제 %.0f fps (목표 %s) · 촬영 %.0f초\n관 단면을 원 안에 맞추고, 수면을 위에서 비스듬히 내려다보세요",
-            w, h, fpsEstimate, fpsRange?.toString() ?: "기본", settings.durationSec)
+    // ------------------------------------------------------------------ 실시간 검출
+    private fun liveDetect(w: Int, h: Int) {
+        val f = max(1, ceil(max(w, h) / 320.0).toInt())
+        val sw = w / f; val sh = h / f
+        if (smallBuf.size != sw * sh) smallBuf = ByteArray(sw * sh)
+        val area = f * f
+        for (y in 0 until sh) {
+            for (x in 0 until sw) {
+                var s = 0
+                val y0 = y * f; val x0 = x * f
+                for (dy in 0 until f) {
+                    val row = (y0 + dy) * w + x0
+                    for (dx in 0 until f) s += yBuf[row + dx].toInt() and 0xFF
+                }
+                smallBuf[y * sw + x] = (s / area).toByte()
+            }
+        }
+        val prior = smooth?.scaled(1.0 / f)
+        val r = detector.detect(smallBuf, sw, sh, if (locked) prior else null)
+        lastDetectMs = r.millis
+        if (r.found && r.ellipse != null) {
+            val e = r.ellipse.scaled(f.toDouble())
+            val s = smooth
+            smooth = if (s == null) e else blend(s, e, 0.4)
+            foundStreak++; missStreak = 0
+            lastCoverage = r.coverage; lastBrightness = r.brightness; lastSharpness = r.sharpness
+        } else {
+            missStreak++; foundStreak = 0
+            if (missStreak >= 4) { smooth = null; locked = false }
+        }
+        if (foundStreak >= 2) locked = true
+        val sm = smooth
+        val bright = if (r.found) r.brightness else meanBrightness(smallBuf)
+        runOnUiThread { updateOverlay(sm, w, h, bright) }
     }
 
+    private fun meanBrightness(b: ByteArray): Double {
+        var s = 0L
+        var i = 0
+        while (i < b.size) { s += (b[i].toInt() and 0xFF); i += 4 }
+        return s.toDouble() / max(1, b.size / 4)
+    }
+
+    private fun blend(a: LiveRimDetector.Ellipse, b: LiveRimDetector.Ellipse, k: Double): LiveRimDetector.Ellipse {
+        var dphi = b.phi - a.phi
+        while (dphi > Math.PI / 2) dphi -= Math.PI
+        while (dphi < -Math.PI / 2) dphi += Math.PI
+        return LiveRimDetector.Ellipse(a.cx + k * (b.cx - a.cx), a.cy + k * (b.cy - a.cy),
+            a.a + k * (b.a - a.a), a.b + k * (b.b - a.b), a.phi + k * dphi)
+    }
+
+    /** 센서 방향 좌표 → 세로(업라이트) 영상 좌표 */
+    private fun toUpright(x: Double, y: Double, w: Int, h: Int, rot: Int): DoubleArray = when ((rot / 90) % 4) {
+        1 -> doubleArrayOf(h - 1 - y, x)
+        2 -> doubleArrayOf(w - 1 - x, h - 1 - y)
+        3 -> doubleArrayOf(y, w - 1 - x)
+        else -> doubleArrayOf(x, y)
+    }
+
+    private fun updateOverlay(e: LiveRimDetector.Ellipse?, w: Int, h: Int, brightness: Double) {
+        if (recording) return
+        val rot = rotation
+        val uw = if (rot % 180 == 0) w else h
+        val uh = if (rot % 180 == 0) h else w
+        // PreviewView FILL_CENTER 매핑
+        val vw = previewView.width.toDouble(); val vh = previewView.height.toDouble()
+        val sc = max(vw / uw, vh / uh)
+        val ox = (vw - uw * sc) / 2; val oy = (vh - uh * sc) / 2
+        val checks = ArrayList<GuideOverlayView.Check>()
+        var ready: Boolean
+
+        if (e == null || !locked) {
+            guide.state = GuideOverlayView.State.SEARCHING
+            guide.outer = null; guide.inner = null; guide.centerView = null
+            guide.headline = "관 테두리를 찾는 중…"
+            checks += GuideOverlayView.Check("관 포착", 2, "관 끝단을 화면 가운데에 비추세요")
+            ready = false
+        } else {
+            val rIn = settings.diameterMm / 2
+            val k = rIn / (rIn + settings.wallMm)
+            val n = 72
+            val outer = FloatArray(2 * n); val inner = FloatArray(2 * n)
+            var inside = true
+            val minU = 0.01 * min(uw, uh)
+            for (i in 0 until n) {
+                val t = 2 * Math.PI * i / n
+                val po = e.point(t)
+                val pi = LiveRimDetector.Ellipse(e.cx, e.cy, e.a * k, e.b * k, e.phi).point(t)
+                val uo = toUpright(po[0], po[1], w, h, rot)
+                val ui = toUpright(pi[0], pi[1], w, h, rot)
+                if (uo[0] < minU || uo[0] > uw - minU || uo[1] < minU || uo[1] > uh - minU) inside = false
+                outer[2 * i] = (uo[0] * sc + ox).toFloat(); outer[2 * i + 1] = (uo[1] * sc + oy).toFloat()
+                inner[2 * i] = (ui[0] * sc + ox).toFloat(); inner[2 * i + 1] = (ui[1] * sc + oy).toFloat()
+            }
+            val uc = toUpright(e.cx, e.cy, w, h, rot)
+            guide.outer = outer; guide.inner = inner
+            guide.centerView = floatArrayOf((uc[0] * sc + ox).toFloat(), (uc[1] * sc + oy).toFloat())
+            guide.state = GuideOverlayView.State.LOCKED
+
+            // 촬영 준비 체크
+            val cov = lastCoverage
+            checks += GuideOverlayView.Check("관 포착", if (cov >= 0.6) 0 else 1,
+                String.format(Locale.US, "테두리 확인 %.0f%%", cov * 100))
+            val fill = e.a / (min(uw, uh) / 2.0)
+            checks += GuideOverlayView.Check("크기", when {
+                fill < 0.45 -> 1; fill > 0.98 -> 1; else -> 0 },
+                when { fill < 0.45 -> "조금 더 가까이"; fill > 0.98 -> "조금 더 멀리"; else -> String.format(Locale.US, "화면의 %.0f%%", fill * 100) })
+            val offX = abs(uc[0] - uw / 2.0) / uw; val offY = abs(uc[1] - uh / 2.0) / uh
+            checks += GuideOverlayView.Check("중앙", if (max(offX, offY) < 0.15) 0 else 1,
+                if (max(offX, offY) < 0.15) "좋음" else "관을 화면 가운데로")
+            checks += GuideOverlayView.Check("테두리 전체", if (inside) 0 else 2, if (inside) "화면 안" else "잘림 — 조금 멀리")
+            val stable = gyroMag < 0.06
+            checks += GuideOverlayView.Check("흔들림", if (stable) 0 else 1, if (stable) "안정" else "폰을 고정하세요")
+            val tilt = Math.toDegrees(acos((e.b / e.a).coerceIn(0.0, 1.0)))
+            checks += GuideOverlayView.Check("각도", if (e.b / e.a >= 0.2) 0 else 1,
+                String.format(Locale.US, "관 기울기 %.0f° · 내려다봄 %.0f°", tilt, lookDownDeg()))
+            ready = cov >= 0.6 && fill in 0.45..0.98 && inside && stable && max(offX, offY) < 0.15
+            guide.headline = if (ready) "촬영 준비 완료" else "빨간 원이 관 내경에 맞도록 조정하세요"
+        }
+        val dark = brightness < 50
+        checks += GuideOverlayView.Check("밝기", when { dark -> 2; brightness > 230 -> 1; else -> 0 },
+            when { dark -> if (torchOn) "어두움" else "어두움 — 조명을 켜세요"; brightness > 230 -> "너무 밝음(반사)"; else -> "좋음" })
+        if (dark) ready = false
+        guide.checks = checks
+        guide.ready = ready
+        btnRecord.text = if (ready) "촬영 (준비 완료)" else "촬영 (준비 안 됨)"
+        btnRecord.setBackgroundColor(if (ready) Color.rgb(46, 160, 67) else Color.rgb(120, 120, 120))
+        txtStatus.text = String.format(Locale.US, "분석 %d×%d · %.0f fps (목표 %s) · 검출 %.0f ms · 촬영 %.0f초",
+            w, h, fpsEstimate, fpsRange?.toString() ?: "기본", lastDetectMs, settings.durationSec)
+    }
+
+    // ------------------------------------------------------------------ 저장
     private fun finishRecording() {
         recording = false
         framesOut?.flush(); framesOut?.close(); framesOut = null
@@ -267,9 +465,18 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
             .put("count", timestamps.size).put("timestamps_ns", JSONArray(timestamps))
             .put("fps", fpsEstimate).put("binning", 2))
         meta.put("fps_range", fpsRange?.toString())
+        meta.put("torch", torchOn)
         if (gravN > 0) meta.put("gravity", JSONArray(gravSum.map { it / gravN }))
         meta.put("params", settings.toParams())
-        // 카메라 내부 파라미터 (still 해상도 기준)
+        // 실시간으로 포착한 테두리 → 회전 보정된 still 좌표로 저장 (분석 시 정밀화의 시작값)
+        liveEllipseAtStart?.let { e ->
+            val c = toUpright(e.cx, e.cy, stillW, stillH, rotation)
+            var phi = e.phi + Math.toRadians(rotation.toDouble())
+            while (phi > Math.PI / 2) phi -= Math.PI
+            while (phi <= -Math.PI / 2) phi += Math.PI
+            meta.put("live_ellipse", JSONObject().put("cx", c[0]).put("cy", c[1]).put("a", e.a).put("b", e.b)
+                .put("phi_deg", Math.toDegrees(phi)).put("coverage", liveCoverageAtStart))
+        }
         try {
             val cam = camera
             val ch = if (cam != null) {

@@ -158,7 +158,7 @@ def detect_rim(img: np.ndarray, n_hyp: int = 3000, seed: int = 0) -> tuple[Ellip
 
     cx, cy, a, b, ok = _batch_conic_to_params(c)
     m = min(H, W)
-    ok = ok & (a > 0.25 * m) & (a < 1.2 * max(H, W)) & (b / a > 0.3)
+    ok = ok & (a > 0.25 * m) & (a < 1.2 * max(H, W)) & (b / a > 0.15)
     ok = ok & (cx > 0.1 * W) & (cx < 0.9 * W) & (cy > 0.1 * H) & (cy < 0.9 * H)
     c = c[ok]
     if len(c) == 0:

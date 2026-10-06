@@ -99,11 +99,20 @@ def analyze(session_dir, params_json="{}", listener=None):
             wk.update(theta_center_deg=roll, max_angle_deg=12.0)
         wl_pts = p.get("waterline_pts")
         ell = Ellipse.from_dict(p["ellipse"]) if p.get("ellipse") else None
+        rim_source = "manual_or_previous" if ell is not None else "auto_ransac"
+        live = meta.get("live_ellipse")
+        if ell is None and live and p.get("use_live_ellipse", True):
+            # 촬영 화면에서 실시간으로 잡은 타원(회전 보정된 still 좌표)을 원 해상도에서 정밀화
+            from pipeflow_core.detect import refine_rim_from_seed
+            _say(listener, "수위 계산: 화면에서 포착한 테두리 정밀화 중…")
+            ell, rinfo = refine_rim_from_seed(still.astype(np.float64), Ellipse.from_dict(live))
+            rim_source = "live_seed"
         lvl = measure_level(still.astype(np.float64), D, wall, ellipse=ell, waterline_pts=wl_pts,
                             f_px=f_px, principal=principal,
                             camera_above=bool(p.get("camera_above", True)), waterline_kwargs=wk)
         out["level"] = lvl.summary()
         out["level"]["expected_roll_deg"] = None if roll is None else round(roll, 1)
+        out["level"]["rim_source"] = rim_source
         out["overlay"] = dict(width=Ws, height=Hs, ellipse=lvl.ellipse.to_dict(),
                               waterline=np.round(lvl.waterline_img, 2).tolist(),
                               rotation_degrees=rot)

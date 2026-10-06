@@ -18,7 +18,13 @@
         android:orientation="vertical" android:padding="16dp">
         <TextView android:id="@+id/txtStatus" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="13sp" />
-        <Button android:id="@+id/btnRecord" android:layout_width="match_parent"
-            android:layout_height="64dp" android:layout_marginTop="8dp" android:text="촬영" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:orientation="horizontal">
+            <Button android:id="@+id/btnTorch" style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="64dp"
+                android:textColor="#FFFFFF" android:text="조명 켜기" />
+            <Button android:id="@+id/btnRecord" android:layout_width="0dp" android:layout_weight="2"
+                android:layout_height="64dp" android:layout_marginStart="8dp" android:text="촬영" />
+        </LinearLayout>
     </LinearLayout>
 </FrameLayout>

@@ -138,7 +138,7 @@ def _detect_rim_once(small, s, edge_data, n_hyp: int = 4000, seed: int = 0, scor
     cx, cy, a, b, ok = _params(c)
     m = min(H, W)
     with np.errstate(invalid="ignore"):
-        ok = ok & (a > 0.25 * m) & (a < 1.2 * max(H, W)) & (b / a > 0.3)
+        ok = ok & (a > 0.25 * m) & (a < 1.2 * max(H, W)) & (b / a > 0.15)   # 75° 내려다봐도 0.26
         ok = ok & (cx > 0.1 * W) & (cx < 0.9 * W) & (cy > 0.1 * H) & (cy < 0.9 * H)
     c = c[ok]
     if len(c) == 0:
@@ -220,6 +220,28 @@ def polish_ellipse(g, el: Ellipse, iters=60):
             if steps[0] < 0.1:
                 break
     return Ellipse(*p), f
+
+
+def refine_rim_from_seed(gray: np.ndarray, seed: Ellipse):
+    """실시간 검출(앱 미리보기)로 얻은 타원을 원 해상도에서 국소 정밀화.
+    반환: (타원, info). 전역 RANSAC 보다 수십 배 빠름."""
+    small, s = to_work(gray)
+    el = seed.scaled(s)
+    pts, nrm, _ = _edge_points(small)
+    # 1) seed 주변 엣지로 재피팅 (띠를 점점 좁힘) — 실시간 검출의 수 % 오차 제거
+    for tol in (max(4.0, 0.06 * el.a), max(2.5, 0.025 * el.a), max(2.0, 0.015 * el.a)):
+        d, nx, ny = _sampson(el.coef6()[None], pts)
+        cos = np.abs(nx * nrm[None, :, 0] + ny * nrm[None, :, 1])
+        inl = ((d < tol) & (cos > 0.85))[0]
+        if inl.sum() < 30:
+            break
+        e2 = fit_ellipse(pts[inl])
+        if e2 is None or e2.b / e2.a < 0.1:
+            break
+        el = e2
+    # 2) 둘레 엣지 강도로 미세 조정
+    el, score = polish_ellipse(small, el)
+    return el.scaled(1 / s), dict(source="live_seed", edge_score=score, scale=s)
 
 
 # ---------------------------------------------------------------------------
