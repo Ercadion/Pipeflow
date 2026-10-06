@@ -14,7 +14,7 @@ import kotlin.math.sin
 
 /**
  * 촬영 화면 오버레이
- *  - 실시간으로 포착한 관 테두리: 바깥(흰 실선) + 내경(빨강) 타원
+ *  - 실시간으로 포착한 관 내경(빨강) 타원 (outer 를 주면 흰 실선으로 함께 표시)
  *  - 상태: 찾는 중(회색 점선 가이드) / 포착(빨강 내경) / 촬영 중(빨강 굵게 + REC)
  *  - 촬영 준비 체크리스트, 중력 기준 수평선
  */
@@ -67,13 +67,13 @@ class GuideOverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeS
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
         val o = outer; val inn = inner
-        if (state == State.SEARCHING || o == null || inn == null) {
+        if (state == State.SEARCHING || inn == null) {
             // 찾는 중: 가이드 원(점선)
             val r = min(width, height) * 0.36f
             c.drawCircle(width / 2f, height * 0.42f, r, pGuide)
         } else {
             pInner.strokeWidth = (if (state == State.RECORDING) 5f else 3.5f) * dp
-            c.drawPath(path(o), pOuter)
+            if (o != null) c.drawPath(path(o), pOuter)
             c.drawPath(path(inn), pInner)
         }
         // 중력 수평선 (관 중심 또는 화면 중심 통과)

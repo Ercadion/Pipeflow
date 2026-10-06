@@ -72,14 +72,13 @@ def _expected_roll_deg(gravity):
 
 def analyze(session_dir, params_json="{}", listener=None):
     t0 = time.time()
-    out = dict(ok=False, version="0.2.0")
+    out = dict(ok=False, version="0.3.2")
     try:
         p = json.loads(params_json) if params_json else {}
         with open(os.path.join(session_dir, "meta.json"), encoding="utf-8") as f:
             meta = json.load(f)
         out["session"] = os.path.basename(session_dir.rstrip("/"))
         D = float(p.get("diameter_mm", meta.get("params", {}).get("diameter_mm", 100)))
-        wall = float(p.get("wall_mm", meta.get("params", {}).get("wall_mm", 0)))
         rot = int(meta.get("rotation_degrees", 0))
 
         # ---- 1) 수위 (첫 프레임, 원 해상도) -------------------------------------
@@ -107,12 +106,23 @@ def analyze(session_dir, params_json="{}", listener=None):
             _say(listener, "수위 계산: 화면에서 포착한 테두리 정밀화 중…")
             ell, rinfo = refine_rim_from_seed(still.astype(np.float64), Ellipse.from_dict(live))
             rim_source = "live_seed"
-        lvl = measure_level(still.astype(np.float64), D, wall, ellipse=ell, waterline_pts=wl_pts,
+        inner_source = None
+        if ell is None:
+            from pipeflow_core.detect import detect_rim
+            ell, _ = detect_rim(still.astype(np.float64))
+        if rim_source != "manual_or_previous":
+            # 관 두께 입력 없이 내경 테두리 선택 (끝단 면의 바깥/안쪽 동심 테두리 중 안쪽)
+            from pipeflow_core.detect import select_inner_rim
+            _say(listener, "수위 계산: 관 내경 테두리 확인 중…")
+            ell, iinfo = select_inner_rim(still.astype(np.float64), ell, f_px=f_px, principal=principal)
+            inner_source = iinfo.get("inner_source")
+        lvl = measure_level(still.astype(np.float64), D, 0.0, rim_is="inner", ellipse=ell, waterline_pts=wl_pts,
                             f_px=f_px, principal=principal,
                             camera_above=bool(p.get("camera_above", True)), waterline_kwargs=wk)
         out["level"] = lvl.summary()
         out["level"]["expected_roll_deg"] = None if roll is None else round(roll, 1)
         out["level"]["rim_source"] = rim_source
+        out["level"]["inner_source"] = inner_source
         out["overlay"] = dict(width=Ws, height=Hs, ellipse=lvl.ellipse.to_dict(),
                               waterline=np.round(lvl.waterline_img, 2).tolist(),
                               rotation_degrees=rot)

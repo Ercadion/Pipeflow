@@ -8,7 +8,7 @@ import math
 
 import numpy as np
 
-from .geometry import Ellipse, fit_ellipse, rectify_affine
+from .geometry import Ellipse, _orth_basis, circle_pose, fit_ellipse, project, rectify_affine
 from .imgproc import bilinear, canny, gaussian_blur, label_components, resize_area, sobel
 
 WORK_SIZE = 720
@@ -229,7 +229,8 @@ def refine_rim_from_seed(gray: np.ndarray, seed: Ellipse):
     el = seed.scaled(s)
     pts, nrm, _ = _edge_points(small)
     # 1) seed 주변 엣지로 재피팅 (띠를 점점 좁힘) — 실시간 검출의 수 % 오차 제거
-    for tol in (max(4.0, 0.06 * el.a), max(2.5, 0.025 * el.a), max(2.0, 0.015 * el.a)):
+    # 실시간 seed 는 이미 관 내경(안쪽 테두리) → 바깥 테두리(보통 수 % 바깥)까지 넘지 않게 띠를 좁게 시작
+    for tol in (max(3.0, 0.03 * el.a), max(2.0, 0.018 * el.a), max(1.5, 0.012 * el.a)):
         d, nx, ny = _sampson(el.coef6()[None], pts)
         cos = np.abs(nx * nrm[None, :, 0] + ny * nrm[None, :, 1])
         inl = ((d < tol) & (cos > 0.85))[0]
@@ -242,6 +243,152 @@ def refine_rim_from_seed(gray: np.ndarray, seed: Ellipse):
     # 2) 둘레 엣지 강도로 미세 조정
     el, score = polish_ellipse(small, el)
     return el.scaled(1 / s), dict(source="live_seed", edge_score=score, scale=s)
+
+
+def _coverage(el: Ellipse, pts, nrm, shape, tol, n_bins=120):
+    """타원 둘레(화면 안) 중 엣지 inlier 로 확인된 각도 비율"""
+    d, nx, ny = _sampson(el.coef6()[None], pts)
+    cos = np.abs(nx * nrm[None, :, 0] + ny * nrm[None, :, 1])
+    inl = ((d < tol) & (cos > 0.85))[0]
+    c, s_ = math.cos(el.phi), math.sin(el.phi)
+    dx, dy = pts[inl, 0] - el.cx, pts[inl, 1] - el.cy
+    t = np.arctan2((-s_ * dx + c * dy) / el.b, (c * dx + s_ * dy) / el.a)
+    occ = np.zeros(n_bins, bool)
+    occ[np.clip(((t + math.pi) / (2 * math.pi) * n_bins).astype(np.int64), 0, n_bins - 1)] = True
+    tt = -math.pi + (np.arange(n_bins) + 0.5) * 2 * math.pi / n_bins
+    px = el.cx + c * el.a * np.cos(tt) - s_ * el.b * np.sin(tt)
+    py = el.cy + s_ * el.a * np.cos(tt) + c * el.b * np.sin(tt)
+    H, W = shape
+    vis = (px >= 2) & (px < W - 2) & (py >= 2) & (py < H - 2)
+    if vis.sum() < n_bins / 3:
+        return 0.0
+    return float((occ & vis).sum() / vis.sum())
+
+
+def _concentric_family(e0: Ellipse, K: np.ndarray):
+    """투시 정확: e0 와 같은 평면·같은 중심의 원(반지름 비 k)이 화면에 맺히는 타원을 주는 함수들
+    (자세 해가 2개라 함수도 2개). 초점거리를 알 때 사용."""
+    fams = []
+    tt = np.linspace(0, 2 * math.pi, 48, endpoint=False)
+    for sol in circle_pose(e0, K, 1.0):
+        n, C = sol["normal"], sol["center"]
+        e1, e2 = _orth_basis(n)
+        ring = np.cos(tt)[:, None] * e1[None] + np.sin(tt)[:, None] * e2[None]
+
+        def fam(k, C=C, ring=ring):
+            return fit_ellipse(project(K, C[None] + k * ring))
+        fams.append(fam)
+    return fams
+
+
+def select_inner_rim(gray: np.ndarray, el: Ellipse, min_scale: float = 0.72, max_scale: float = 1.38,
+                     min_cov: float = 0.5, f_px=None, principal=None):
+    """관 내경(안쪽 테두리) 선택 — 관 두께 입력 불필요. (앱 LiveRimDetector.selectInner 와 같은 규칙)
+    끝단 면이 보이면 바깥·안쪽 두 동심 테두리가 생김 → 안쪽을 씀.
+    타원을 0.72~1.38배(+ 투시에 의한 단축 방향 중심 이동)로 바꿔가며 둘레 덮임 비율 측정:
+    - 안쪽(≤0.97배)에 둘레 대부분이 확인되는 테두리 → 그것을 좁은 띠로 재피팅 (관 벽은 보통 얇아 우선)
+    - 아니고 바깥(≥1.03배)에 확실한 테두리 → 검출 타원이 이미 안쪽
+    - 둘 다 없으면 검출 타원 = 내경 (맨홀 벽에 묻혀 끝단 면이 안 보이는 경우 등)
+    f_px, principal 을 주면 투시를 정확히 반영한 동심원 타원 사용 (가파른 각도에서 정확), 아니면 균일 축소 + 중심 이동 탐색.
+    반환: (타원, info)"""
+    small, s = to_work(gray)
+    e0 = el.scaled(s)
+    fams = []
+    if f_px:
+        H0, W0 = gray.shape[:2]
+        cx0, cy0 = principal if principal is not None else (W0 / 2, H0 / 2)
+        Ks = np.array([[f_px * s, 0, (cx0 + 0.5) * s - 0.5], [0, f_px * s, (cy0 + 0.5) * s - 0.5], [0, 0, 1.0]])
+        try:
+            fams = _concentric_family(e0, Ks)
+        except Exception:
+            fams = []
+    pts, nrm, _ = _edge_points(small)
+    if len(pts) > 8000:
+        sel = np.random.default_rng(0).choice(len(pts), 8000, replace=False)
+        pts_s, nrm_s = pts[sel], nrm[sel]
+    else:
+        pts_s, nrm_s = pts, nrm
+    tol = max(1.2, 0.01 * e0.a)
+    step = 1.5 * tol
+    ux, uy = -math.sin(e0.phi), math.cos(e0.phi)
+    scales = np.round(np.arange(min_scale, max_scale + 1e-9, 0.01), 3)
+    prof = np.zeros(len(scales))
+    best_el = [None] * len(scales)
+    for i, f in enumerate(scales):
+        cands = []
+        if fams:
+            cands = [fam(f) for fam in fams]
+            cands = [c for c in cands if c is not None]
+        if not cands:
+            ns = int(math.floor(0.3 * abs(1 - f) * e0.a / step))
+            cands = [Ellipse(e0.cx + ux * step * k, e0.cy + uy * step * k, e0.a * f, e0.b * f, e0.phi)
+                     for k in range(-ns, ns + 1)]
+        for c in cands:
+            v = _coverage(c, pts_s, nrm_s, small.shape, tol)
+            if v > prof[i] or best_el[i] is None:
+                prof[i], best_el[i] = v, c
+    def is_peak(i):
+        return 0 < i < len(scales) - 1 and prof[i] >= min_cov and prof[i] >= prof[i - 1] and prof[i] >= prof[i + 1]
+
+    info = dict(base_cov=round(float(prof[np.argmin(np.abs(scales - 1.0))]), 2))
+    near = [i for i in range(len(scales)) if abs(scales[i] - 1) <= 0.025 and is_peak(i)]
+    i0 = max(near, key=lambda k: prof[k]) if near else int(np.argmin(np.abs(scales - 1.0)))
+    up = [i for i in range(len(scales)) if is_peak(i) and scales[i] >= scales[i0] + 0.03]
+    dn = [i for i in range(len(scales)) if is_peak(i) and scales[i] <= scales[i0] - 0.03]
+    iu = max(up, key=lambda k: prof[k]) if up else None
+    idn = max(dn, key=lambda k: (prof[k], scales[k])) if dn else None
+    if idn is not None and prof[idn] >= 0.55 and (iu is None or prof[idn] >= prof[iu] - 0.05):
+        i, gap_f = idn, scales[i0] - scales[idn]
+        info["inner_source"] = "inner_ring"
+    elif iu is not None and prof[iu] >= 0.7:
+        i, gap_f = i0, scales[iu] - scales[i0]
+        info["inner_source"] = "detected_is_inner"
+    else:
+        info["inner_source"] = "single_rim"
+        return el, info
+    f = float(scales[i])
+    e = best_el[i]
+    # 다른 테두리까지 화면상 최소 거리(가파른 각도에선 단축 방향이 매우 좁음) → 재피팅 띠가 넘지 않게
+    j = int(np.argmin(np.abs(scales - (scales[i] + gap_f))))     # 짝이 되는 다른 테두리
+    other = best_el[j] if best_el[j] is not None else e0
+    d, _, _ = _sampson(other.coef6()[None], e.points(90))
+    gap = float(d.min())
+    for t in (min(0.03 * e.a, 0.4 * gap), min(0.015 * e.a, 0.3 * gap), min(0.01 * e.a, 0.25 * gap)):
+        t = max(t, 0.7)
+        d, nx, ny = _sampson(e.coef6()[None], pts)
+        cos = np.abs(nx * nrm[None, :, 0] + ny * nrm[None, :, 1])
+        inl = ((d < t) & (cos > 0.85))[0]
+        if inl.sum() < 30:
+            break
+        e2 = fit_ellipse(pts[inl])
+        if e2 is None or e2.b / e2.a < 0.1:
+            break
+        e = e2
+    e = e.scaled(1 / s)
+    other = other.scaled(1 / s)
+    # 원 해상도에서 마지막 재피팅 (가파른 각도에선 두 테두리 간격이 몇 px 뿐이라 축소 영상으로는 부족)
+    if s < 1:
+        gf = gap / s
+        H0, W0 = gray.shape[:2]
+        x0 = int(max(0, e.cx - e.a - 4)); x1 = int(min(W0, e.cx + e.a + 5))
+        y0 = int(max(0, e.cy - e.a - 4)); y1 = int(min(H0, e.cy + e.a + 5))
+        crop = np.asarray(gray, np.float64)[y0:y1, x0:x1]
+        if crop.size > 0:
+            pf, nf, _ = _edge_points(crop)
+            pf = pf + np.array([x0, y0])
+            for t in (max(0.8, min(0.012 * e.a, 0.3 * gf)), max(0.7, min(0.008 * e.a, 0.25 * gf))):
+                d, nx, ny = _sampson(e.coef6()[None], pf)
+                cos = np.abs(nx * nf[None, :, 0] + ny * nf[None, :, 1])
+                inl = ((d < t) & (cos > 0.85))[0]
+                if inl.sum() < 40:
+                    break
+                e2 = fit_ellipse(pf[inl])
+                if e2 is None or e2.b / e2.a < 0.1:
+                    break
+                e = e2
+    info.update(perspective=bool(fams), gap_px=round(gap / s, 2), inner_scale=round(f, 3),
+                inner_cov=round(float(prof[i]), 2), gap_scale=round(float(gap_f), 3))
+    return e, info
 
 
 # ---------------------------------------------------------------------------

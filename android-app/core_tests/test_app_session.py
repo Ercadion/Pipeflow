@@ -30,7 +30,7 @@ def make_session(d, v_true=0.25, depth=45, fps=60.0, n=150, jitter=True):
                             timestamps_ns=(t * 1e9).astype(np.int64).tolist(), fps=fps),
                 rotation_degrees=90,
                 intrinsics=dict(f_px=f, cx=H / 2, cy=W / 2 - 1, source="synthetic"),
-                gravity=[0.0, 9.5, 2.0], params=dict(diameter_mm=100, wall_mm=4))
+                gravity=[0.0, 9.5, 2.0], params=dict(diameter_mm=100))
     json.dump(meta, open(os.path.join(d, "meta.json"), "w"))
 
 class L:
@@ -40,11 +40,11 @@ for v in [0.05, 0.25, -0.15]:
     d = f"/tmp/claude-0/sess/v{v}"
     make_session(d, v_true=v)
     t = time.time()
-    r = json.loads(pipeflow_app.analyze(d, json.dumps(dict(diameter_mm=100, wall_mm=4, slope=0.005, texture_sign=0)), L()))
+    r = json.loads(pipeflow_app.analyze(d, json.dumps(dict(diameter_mm=100, slope=0.005, texture_sign=0)), L()))
     if not r["ok"]:
         print(r["traceback"]); break
     s = r["velocity_stiv"]
-    print(f"v_true={v:+.2f}: h={r['level']['depth_mm']} (참 45), method={r['level']['method']}, "
+    print(f"v_true={v:+.2f}: h={r['level']['depth_mm']} (참 45), method={r['level']['method']}, inner={r['level'].get('inner_source')}, "
           f"roll={r['level']['roll_deg']} (예상 {r['level']['expected_roll_deg']}), "
           f"v_surf={s['v_surface_mps']:+.4f} ({(s['v_surface_mps']-v)/abs(v)*100:+.2f}%), "
           f"fps={s['fps']:.1f}, 보간={s['resampled']}, 등류공식 V={r['velocity_formula']['V_mean_mps']:.3f}, {time.time()-t:.1f}s")

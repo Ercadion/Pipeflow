@@ -6,7 +6,6 @@ import org.json.JSONObject
 /** 측정 설정 (SharedPreferences 저장). meta.json 의 params 로도 기록되어 세션이 자급자족. */
 data class Settings(
     var diameterMm: Double = 100.0,
-    var wallMm: Double = 0.0,
     var slopePercent: Double? = null,
     var material: String = "glass",
     var textureSign: Int = 1,
@@ -15,7 +14,6 @@ data class Settings(
 ) {
     fun toParams(): JSONObject = JSONObject().apply {
         put("diameter_mm", diameterMm)
-        put("wall_mm", wallMm)
         slopePercent?.let { put("slope", it / 100.0) }
         put("material", material)
         put("texture_sign", textureSign)
@@ -46,7 +44,6 @@ data class Settings(
                 ?: return s
             val o = JSONObject(js)
             s.diameterMm = o.optDouble("diameter_mm", 100.0)
-            s.wallMm = o.optDouble("wall_mm", 0.0)
             s.slopePercent = if (o.has("slope")) o.getDouble("slope") * 100.0 else null
             s.material = o.optString("material", "glass")
             s.textureSign = o.optInt("texture_sign", 1)

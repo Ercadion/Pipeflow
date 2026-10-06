@@ -159,7 +159,13 @@ class ResultActivity : AppCompatActivity() {
             "live_seed" -> "촬영 화면에서 포착한 타원을 정밀화"
             "auto_ransac" -> "전체 영상 자동 검출"
             else -> "이전 결과 재사용"
-        }).append("\n")
+        })
+        when (lv.optString("inner_source")) {
+            "inner_ring" -> sb.append(" · 내경: 끝단 면 안쪽 테두리")
+            "detected_is_inner" -> sb.append(" · 내경: 안쪽 테두리(바깥 테두리 확인)")
+            "single_rim" -> sb.append(" · 내경: 테두리 하나(그대로 사용)")
+        }
+        sb.append("\n")
         if (lv.has("waterline_confidence"))
             sb.append(String.format(Locale.US, "   수면선 검출 신뢰도 %.2f (낮으면 수동 수정 권장)\n", lv.optDouble("waterline_confidence")))
         r.optJSONObject("velocity_stiv")?.let { s ->

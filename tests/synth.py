@@ -59,6 +59,11 @@ class Scene:
         Xw = torch.stack([self.r_out * torch.cos(t), self.r_out * torch.sin(t), torch.zeros_like(t)], 1)
         return self.project_world(Xw)
 
+    def inner_circle_pts(self, n=200):
+        t = torch.linspace(0, 2 * math.pi, n, dtype=DT)
+        Xw = torch.stack([self.r_in * torch.cos(t), self.r_in * torch.sin(t), torch.zeros_like(t)], 1)
+        return self.project_world(Xw)
+
     def waterline_pts(self):
         d = self.r_in - self.h
         half = math.sqrt(self.r_in**2 - d**2)

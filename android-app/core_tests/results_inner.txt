@@ -1,0 +1,18 @@
+  두께   각도   참h |      자동   seed바깥   seed안쪽 | 선택(자동/바깥/안쪽)
+   4   30   25 |   24.86    24.86    24.86 | inner/inner/detec
+   4   30   75 |   74.90    74.90    74.90 | inner/inner/detec
+   4   45   25 |   24.76    24.76    24.76 | inner/inner/detec
+   4   45   75 |   74.86    74.86    74.86 | inner/inner/detec
+   4   60   25 |   24.72    24.72    24.71 | inner/inner/detec
+   4   60   75 |   75.45    74.79    74.79 | singl/inner/detec
+   4   75   25 |   23.44    23.44    23.38 | inner/inner/inner
+   4   75   75 |   74.50    74.47    74.50 | inner/inner/inner
+  12   30   25 |   24.86    24.86    24.86 | inner/inner/detec
+  12   30   75 |   74.90    74.90    74.90 | inner/inner/detec
+  12   45   25 |   24.76    24.76    24.76 | inner/inner/detec
+  12   45   75 |   74.86    74.86    74.86 | inner/inner/detec
+  12   60   25 |   24.71    24.71    24.71 | inner/inner/detec
+  12   60   75 |   74.79    74.79    74.79 | inner/inner/detec
+  12   75   25 |   24.37    24.37    24.37 | inner/inner/detec
+  12   75   75 |   74.65    74.65    74.65 | inner/inner/detec
+최대 오차 1.62 mm

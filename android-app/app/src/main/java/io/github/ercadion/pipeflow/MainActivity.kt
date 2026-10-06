@@ -15,7 +15,6 @@ import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var editD: TextInputEditText
-    private lateinit var editWall: TextInputEditText
     private lateinit var editSlope: TextInputEditText
     private lateinit var spinMat: Spinner
     private lateinit var spinTex: Spinner
@@ -26,7 +25,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         editD = findViewById(R.id.editDiameter)
-        editWall = findViewById(R.id.editWall)
         editSlope = findViewById(R.id.editSlope)
         spinMat = findViewById(R.id.spinMaterial)
         spinTex = findViewById(R.id.spinTexture)
@@ -41,7 +39,7 @@ class MainActivity : AppCompatActivity() {
         spinDur.adapter = adapter(Settings.DURATIONS.map { "촬영 ${it.toInt()}초 (느린 흐름은 길게)" })
 
         val s = Settings.load(this)
-        editD.setText(fmt(s.diameterMm)); editWall.setText(fmt(s.wallMm))
+        editD.setText(fmt(s.diameterMm))
         editSlope.setText(s.slopePercent?.let { fmt(it) } ?: "")
         spinMat.setSelection(Settings.MATERIALS.indexOfFirst { it.first == s.material }.coerceAtLeast(0))
         spinTex.setSelection(Settings.TEXTURES.indexOfFirst { it.first == s.textureSign }.coerceAtLeast(0))
@@ -65,7 +63,6 @@ class MainActivity : AppCompatActivity() {
         if (d == null || d <= 0) { Toast.makeText(this, "관 내경을 입력하세요", Toast.LENGTH_SHORT).show(); return null }
         return Settings(
             diameterMm = d,
-            wallMm = editWall.text?.toString()?.toDoubleOrNull() ?: 0.0,
             slopePercent = editSlope.text?.toString()?.toDoubleOrNull(),
             material = Settings.MATERIALS[spinMat.selectedItemPosition].first,
             textureSign = Settings.TEXTURES[spinTex.selectedItemPosition].first,

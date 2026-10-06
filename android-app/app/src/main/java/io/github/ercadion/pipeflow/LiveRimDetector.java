@@ -44,13 +44,22 @@ public final class LiveRimDetector {
         public int edgePoints;
         public boolean tracked;      // 이전 타원 추적으로 찾았는지
         public double millis;
+        public double distinct;      // 덮임 - 주변(±15%) 덮임: 잡음 많은 곳의 가짜 타원 걸러냄
+        public Ellipse inner;        // 관 내경 테두리 (끝단 면의 안쪽 동심 테두리, 없으면 ellipse 와 같음)
+        public int innerSource;      // 0: 테두리 하나뿐(그대로 내경), 1: 검출된 것이 이미 안쪽, 2: 안쪽 동심 테두리 찾음
     }
 
     // 조정 가능한 값
-    public double minRatio = 0.15;   // b/a 하한 (위에서 75° 로 내려다봐도 0.26)
+    public double minRatio = 0.20;   // b/a 하한 (위에서 75° 로 내려다봐도 cos75°=0.26)
+    public double minMinorFrac = 0.04; // 단반축 ≥ 짧은 변 × 이 값 (직선 띠가 납작한 타원으로 잡히는 것 방지)
+    public double foundCov = 0.5;    // 포착 판정 둘레 덮임 비율
+    public double quadFrac = 0.3;    // 4분면 각각 이 비율 이상 확인되어야 (최대 1개 예외)
     public double minSizeFrac = 0.18; // 장반축 ≥ 짧은 변 × 이 값
+    static boolean DEBUG = Boolean.getBoolean("rimdebug");
+    public double minDistinct = 0.2; // 포착 판정: 주변 대비 덮임 차이
+    public double edgeFrac = 0.20; // 기울기 상위 비율을 엣지 후보로
     public int bins = 72;
-    public int globalEvery = 12;     // 추적 중에도 N 프레임마다 전역 탐색으로 더 나은 타원 확인
+    public int globalEvery = 8;      // 추적 중에도 N 프레임마다 전역 탐색으로 더 나은 타원 확인
     private int calls = 0;
 
     private final Random rng = new Random(1);
@@ -68,6 +77,7 @@ public final class LiveRimDetector {
     public Result detect(byte[] gray, int w, int h, Ellipse prior) {
         long t0 = System.nanoTime();
         Result r = new Result();
+        rng.setSeed(1);   // 같은 영상이면 매번 같은 결과 (프레임마다 후보가 바뀌는 것 방지)
         alloc(w, h);
         preprocess(gray, w, h);
         extractEdges(w, h);
@@ -87,15 +97,22 @@ public final class LiveRimDetector {
         calls++;
         if (best == null || calls % globalEvery == 0) {
             Cand g = globalSearch(w, h, scoreIdx);
+            if (g != null) {
+                // 전역 후보를 추적과 같은 방식(주변 inlier 재피팅)으로 다듬음 → 첫 포착부터 정확
+                Cand gp = fitNear(g.e, w, h, scoreIdx);
+                if (gp != null && gp.cov > g.cov) g = gp;
+            }
             if (g != null && (best == null || g.occ > best.occ * 1.1)) { best = g; r.tracked = false; }
         }
         if (best != null) {
             Cand ref = refine(best.e, w, h, scoreIdx);
             if (ref != null && ref.cov >= best.cov * 0.95) best = ref;
-            r.found = best.cov >= 0.35;
+            r.distinct = best.cov - clutterCov(best.e, w, h, scoreIdx);
+            r.found = best.cov >= foundCov && r.distinct >= minDistinct;
             r.ellipse = best.e;
             r.coverage = best.cov;
             interiorStats(best.e, w, h, r);
+            if (r.found) selectInner(best.e, w, h, scoreIdx, r);
         }
         r.millis = (System.nanoTime() - t0) / 1e6;
         return r;
@@ -151,7 +168,7 @@ public final class LiveRimDetector {
         for (int y = 1; y < h - 1; y++) for (int x = 1; x < w - 1; x++) {
             int v = Math.min(1023, (int) mag[y * w + x]); hist[v]++; cnt++;
         }
-        int target = (int) (cnt * 0.12), acc = 0, thr = 1023;
+        int target = (int) (cnt * edgeFrac), acc = 0, thr = 1023;
         for (int v = 1023; v >= 0; v--) { acc += hist[v]; if (acc >= target) { thr = v; break; } }
         float t = Math.max(12f, thr);
 
@@ -191,7 +208,12 @@ public final class LiveRimDetector {
                 for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
                     if (dx == 0 && dy == 0) continue;
                     int j = i + dy * w + dx;
-                    if (edge[j] && label[j] < 0) { label[j] = seg; queue[qt++] = j; }
+                    if (edge[j] && label[j] < 0) {
+                        // 기울기 방향이 급변하면(모서리, 직선과 곡선의 만남) 끊음
+                        float mj = Math.max(mag[j], 1e-6f);
+                        float dot = (gx[i] * gx[j] + gy[i] * gy[j]) / (m * mj);
+                        if (dot > 0.82f) { label[j] = seg; queue[qt++] = j; }
+                    }
                 }
             }
             segStart.add(start); segLen.add(ne - start);
@@ -211,7 +233,7 @@ public final class LiveRimDetector {
 
     // ------------------------------------------------------------------
     private static final class Cand {
-        Ellipse e; double cov; int occ;
+        Ellipse e; double cov; int occ, vis; double adj;
         Cand(Ellipse e, double cov, int occ) { this.e = e; this.cov = cov; this.occ = occ; }
     }
 
@@ -242,18 +264,159 @@ public final class LiveRimDetector {
             Cand c = fitSegments(ss, buf, w, h, scoreIdx);
             if (c != null) cands.add(c);
         }
+        // 평행 접선 쌍의 중점 투표로 찾은 중심 → 타원 후보 (조각이 직선과 붙어 있어도 찾음)
+        for (Ellipse seed : centerVoteSeeds(w, h)) {
+            Cand c = refine(seed, w, h, scoreIdx);
+            if (c != null) cands.add(c);
+            Cand c2 = fitNear(seed, w, h, scoreIdx);
+            if (c2 != null) cands.add(c2);
+        }
         if (cands.isEmpty()) return null;
         cands.sort((p, q) -> Integer.compare(q.occ, p.occ));
+        // 상위 후보는 '주변 잡음 대비 선명도'로 다시 정렬: 키보드·글자처럼 엣지가 빽빽한 곳은
+        // 어떤 타원을 그려도 덮임이 높으므로, 타원을 15% 키우고/줄였을 때의 덮임을 빼서 비교
+        int K = Math.min(10, cands.size());
+        for (int i = 0; i < K; i++) { Cand c = cands.get(i); c.adj = (c.cov - 0.8 * clutterCov(c.e, w, h, scoreIdx)) * c.vis; }
+        for (int i = K; i < cands.size(); i++) cands.get(i).adj = -1e9;
+        cands.sort((p, q) -> Double.compare(q.adj, p.adj));
         Cand best = cands.get(0);
         // 동심 후보(관 벽 두께의 안/바깥 테두리) 중 가장 바깥 것
         Cand pick = best;
         for (Cand c : cands) {
-            if (c.occ < 0.85 * best.occ) break;
+            if (c.adj < 0.85 * best.adj) break;
             if (Math.hypot(c.e.cx - best.e.cx, c.e.cy - best.e.cy) < 0.08 * best.e.a
                     && Math.abs(c.e.b / c.e.a - best.e.b / best.e.a) < 0.08 && c.e.a > pick.e.a) pick = c;
         }
         return pick;
     }
+
+    // ------------------------------------------------------------------
+    // 중심 투표: 타원 위 두 점의 접선이 평행하면 두 점의 중점 = 타원 중심.
+    // 같은 중심에 여러 방향(접선 각도)이 모일수록 타원. 직선 띠·평행선은 한 방향에서만 투표하므로 걸러짐.
+    private static final int OB = 48;   // 접선 방향 bin (0~π)
+    private static final int CELL = 4;  // 투표 격자(px)
+
+    private java.util.List<Ellipse> centerVoteSeeds(int w, int h) {
+        java.util.List<Ellipse> out = new ArrayList<>();
+        int n = ne, step = Math.max(1, (n + 2499) / 2500);
+        // 방향 bin 별 점 목록
+        IntList[] byBin = new IntList[OB];
+        for (int b = 0; b < OB; b++) byBin[b] = new IntList();
+        for (int i = 0; i < n; i += step) {
+            double th = Math.atan2(eny[i], enx[i]);   // 법선 방향
+            if (th < 0) th += Math.PI;
+            if (th >= Math.PI) th -= Math.PI;
+            byBin[Math.min(OB - 1, (int) (th / Math.PI * OB))].add(i);
+        }
+        int gw = w / CELL + 1, gh = h / CELL + 1;
+        long[] mask = new long[gw * gh];
+        int[] cnt = new int[gw * gh];
+        int m = Math.min(w, h);
+        double dMin = 2 * minMinorFrac * m, dMin2 = dMin * dMin;
+        for (int b = 0; b < OB; b++) {
+            IntList L = byBin[b];
+            double th = (b + 0.5) * Math.PI / OB;
+            double tx = -Math.sin(th), ty = Math.cos(th);   // 접선 방향
+            for (int u = 0; u < L.size(); u++) {
+                int i = L.get(u);
+                for (int v = u + 1; v < L.size(); v++) {
+                    int j = L.get(v);
+                    double dx = ex[j] - ex[i], dy = ey[j] - ey[i];
+                    double d2 = dx * dx + dy * dy;
+                    if (d2 < dMin2) continue;
+                    // 현이 접선과 거의 평행 = 같은 직선 위 → 제외
+                    if (Math.abs(dx * tx + dy * ty) > 0.9 * Math.sqrt(d2)) continue;
+                    int cx = (int) ((ex[i] + ex[j]) * 0.5 / CELL), cy = (int) ((ey[i] + ey[j]) * 0.5 / CELL);
+                    int k = cy * gw + cx;
+                    mask[k] |= 1L << b; cnt[k]++;
+                }
+            }
+        }
+        // 3×3 이웃 방향 수
+        int[] dirs = new int[gw * gh];
+        for (int y = 1; y < gh - 1; y++) for (int x = 1; x < gw - 1; x++) {
+            long mk = 0;
+            for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) mk |= mask[(y + dy) * gw + x + dx];
+            dirs[y * gw + x] = Long.bitCount(mk);
+        }
+        // 상위 봉우리 3개 (서로 떨어진)
+        int[] peaks = new int[3]; int np = 0;
+        boolean[] used = new boolean[gw * gh];
+        for (int p = 0; p < 3; p++) {
+            int best = -1, bv = 0;
+            for (int k = 0; k < dirs.length; k++) if (!used[k] && dirs[k] > bv) { bv = dirs[k]; best = k; }
+            if (best < 0 || bv < OB / 4) break;
+            peaks[np++] = best;
+            int bx = best % gw, by = best / gw, R = Math.max(3, m / (CELL * 8));
+            for (int y = Math.max(0, by - R); y <= Math.min(gh - 1, by + R); y++)
+                for (int x = Math.max(0, bx - R); x <= Math.min(gw - 1, bx + R); x++) used[y * gw + x] = true;
+        }
+        // 각 봉우리: 투표한 점 쌍(중심 대칭)에서 RANSAC — 쌍 3개(서로 다른 방향)로 중심 고정 타원 결정,
+        // 같은 타원에 맞는 쌍이 많은 방향에 걸쳐 있을수록 좋음
+        for (int p = 0; p < np; p++) {
+            double pcx = (peaks[p] % gw + 0.5) * CELL, pcy = (peaks[p] / gw + 0.5) * CELL;
+            double rad = 1.6 * CELL;
+            IntList PI = new IntList(), PJ = new IntList(), PB = new IntList();
+            for (int b = 0; b < OB; b++) {
+                IntList L = byBin[b];
+                double th = (b + 0.5) * Math.PI / OB;
+                double tx = -Math.sin(th), ty = Math.cos(th);
+                for (int u = 0; u < L.size(); u++) {
+                    int i = L.get(u);
+                    for (int v = u + 1; v < L.size(); v++) {
+                        int j = L.get(v);
+                        double mx = (ex[i] + ex[j]) * 0.5 - pcx, my = (ey[i] + ey[j]) * 0.5 - pcy;
+                        if (mx * mx + my * my > rad * rad) continue;
+                        double dx = ex[j] - ex[i], dy = ey[j] - ey[i];
+                        double d2 = dx * dx + dy * dy;
+                        if (d2 < dMin2 || Math.abs(dx * tx + dy * ty) > 0.9 * Math.sqrt(d2)) continue;
+                        PI.add(i); PJ.add(j); PB.add(b);
+                    }
+                }
+            }
+            int np2 = PI.size();
+            if (np2 < 12) continue;
+            double[] hx = new double[np2], hy = new double[np2];
+            for (int k = 0; k < np2; k++) { hx[k] = (ex[PJ.get(k)] - ex[PI.get(k)]) * 0.5; hy[k] = (ey[PJ.get(k)] - ey[PI.get(k)]) * 0.5; }
+            double[] bestQ = null; int bestS = 0;
+            for (int it = 0; it < 150; it++) {
+                int k1 = rng.nextInt(np2), k2 = rng.nextInt(np2), k3 = rng.nextInt(np2);
+                int b1 = PB.get(k1), b2 = PB.get(k2), b3 = PB.get(k3);
+                if (angDiff(b1, b2) < OB / 8 || angDiff(b1, b3) < OB / 8 || angDiff(b2, b3) < OB / 8) continue;
+                double[][] M = {{hx[k1] * hx[k1], hx[k1] * hy[k1], hy[k1] * hy[k1]},
+                                {hx[k2] * hx[k2], hx[k2] * hy[k2], hy[k2] * hy[k2]},
+                                {hx[k3] * hx[k3], hx[k3] * hy[k3], hy[k3] * hy[k3]}};
+                double[][] Mi = inv3(M);
+                if (Mi == null) continue;
+                double A = Mi[0][0] + Mi[0][1] + Mi[0][2], B = Mi[1][0] + Mi[1][1] + Mi[1][2], C = Mi[2][0] + Mi[2][1] + Mi[2][2];
+                if (A <= 0 || 4 * A * C - B * B <= 0) continue;
+                // 합의: 서로 다른 방향 bin 수
+                long mk = 0;
+                for (int k = 0; k < np2; k++) {
+                    double q = A * hx[k] * hx[k] + B * hx[k] * hy[k] + C * hy[k] * hy[k];
+                    if (Math.abs(q - 1) < 0.08) mk |= 1L << PB.get(k);
+                }
+                int sc = Long.bitCount(mk);
+                if (sc > bestS) { bestS = sc; bestQ = new double[]{A, B, C}; }
+            }
+            if (bestQ == null || bestS < OB / 4) continue;
+            // 합의 쌍의 점으로 일반 타원 피팅
+            DoubleList pts = new DoubleList();
+            for (int k = 0; k < np2; k++) {
+                double q = bestQ[0] * hx[k] * hx[k] + bestQ[1] * hx[k] * hy[k] + bestQ[2] * hy[k] * hy[k];
+                if (Math.abs(q - 1) < 0.08) {
+                    pts.add(ex[PI.get(k)]); pts.add(ey[PI.get(k)]); pts.add(ex[PJ.get(k)]); pts.add(ey[PJ.get(k)]);
+                    if (pts.size() > 1600) break;
+                }
+            }
+            double[] arr = pts.toArray();
+            Ellipse e = fitEllipse(arr, arr.length / 2);
+            if (e != null && plausible(e, w, h)) out.add(e);
+        }
+        return out;
+    }
+
+    private static int angDiff(int a, int b) { int d = Math.abs(a - b) % OB; return Math.min(d, OB - d); }
 
     private Cand fitSegments(int[] ss, double[] buf, int w, int h, int[] scoreIdx) {
         int total = 0;
@@ -306,6 +469,7 @@ public final class LiveRimDetector {
         int m = Math.min(w, h);
         if (!(e.a > minSizeFrac * m && e.a < 1.1 * Math.max(w, h))) return false;
         if (e.b / e.a < minRatio) return false;
+        if (e.b < minMinorFrac * m) return false;
         return e.cx > 0.05 * w && e.cx < 0.95 * w && e.cy > 0.05 * h && e.cy < 0.95 * h;
     }
 
@@ -329,8 +493,23 @@ public final class LiveRimDetector {
         return out.toArray();
     }
 
-    /** 점수: inlier 가 덮는 각도 bin 수 / 화면 안에 있는 bin 수 */
+    /** 점수: inlier 가 덮는 각도 bin 수 / 화면 안에 있는 bin 수 (+ 4분면 분포 검사) */
     private Cand score(Ellipse e, int w, int h, int[] idx, double tol) {
+        int[] qVis = new int[4], qOcc = new int[4];
+        int[] ov = occVis(e, w, h, idx, tol, qVis, qOcc);
+        int nOcc = ov[0], nVis = ov[1];
+        if (nVis < bins / 3) return null;
+        // 각도 분포: 직선/평행선 두 줄이 만든 납작한 가짜 타원은 장축 양 끝이 비어 있음
+        int bad = 0;
+        for (int q = 0; q < 4; q++) if (qVis[q] > 2 && qOcc[q] < quadFrac * qVis[q]) bad++;
+        if (bad > 1) return null;
+        Cand c = new Cand(e, (double) nOcc / nVis, nOcc);
+        c.vis = nVis;
+        return c;
+    }
+
+    /** {덮인 bin 수, 화면 안 bin 수}; qVis/qOcc 가 주어지면 4분면별 집계 */
+    private int[] occVis(Ellipse e, int w, int h, int[] idx, double tol, int[] qVis, int[] qOcc) {
         double[] co = conic(e);
         boolean[] occ = new boolean[bins];
         double c = Math.cos(e.phi), s = Math.sin(e.phi);
@@ -348,11 +527,93 @@ public final class LiveRimDetector {
             double t = -Math.PI + (b + 0.5) * 2 * Math.PI / bins;
             double[] p = e.point(t);
             boolean vis = p[0] >= 2 && p[0] < w - 2 && p[1] >= 2 && p[1] < h - 2;
-            if (vis) nVis++;
-            if (occ[b]) nOcc++;
+            int q = ((int) Math.floor((t + Math.PI / 4) / (Math.PI / 2)) % 4 + 4) % 4;   // 0: 장축 끝, 1·3: 단축 끝
+            if (vis) { nVis++; if (qVis != null) qVis[q]++; }
+            if (occ[b] && vis) { nOcc++; if (qOcc != null) qOcc[q]++; }
         }
-        if (nVis < bins / 3) return null;
-        return new Cand(e, (double) nOcc / nVis, nOcc);
+        return new int[]{nOcc, nVis};
+    }
+
+    /**
+     * 관 내경 선택 (관 두께 입력 없이): 끝단 면이 보이면 바깥·안쪽 동심 테두리 두 개 → 안쪽 사용.
+     * 타원을 0.72~1.38배로 바꿔가며 둘레 덮임 비율을 보고, 검출 타원 바깥에 테두리가 있으면 검출 타원이 안쪽,
+     * 안쪽에 있으면 그것을 (다른 테두리를 넘지 않는 좁은 띠로) 재피팅. 둘 다 없으면 검출 타원 = 내경.
+     */
+    private void selectInner(Ellipse e0, int w, int h, int[] idx, Result r) {
+        r.inner = e0; r.innerSource = 0;
+        int n = 67;                     // 0.72 ~ 1.38, 0.01 간격
+        double[] sc = new double[n], prof = new double[n], sh = new double[n];
+        double tol = Math.max(1.2, 0.01 * e0.a);
+        double step = 1.5 * tol;
+        // 투시 때문에 동심원의 상(像)은 중심이 단축 방향으로 조금 어긋남 → 단축 방향 이동도 탐색
+        double ux = -Math.sin(e0.phi), uy = Math.cos(e0.phi);
+        int[] sub = idx;
+        for (int i = 0; i < n; i++) {
+            sc[i] = 0.72 + 0.01 * i;
+            double maxShift = 0.3 * Math.abs(1 - sc[i]) * e0.a;
+            int ns = (int) Math.floor(maxShift / step);
+            double bestC = 0, bestS = 0;
+            for (int k = -ns; k <= ns; k++) {
+                double d = step * k;
+                Ellipse q = new Ellipse(e0.cx + ux * d, e0.cy + uy * d, e0.a * sc[i], e0.b * sc[i], e0.phi);
+                int[] ov = occVis(q, w, h, sub, tol, null, null);
+                double c = ov[1] >= bins / 3 ? (double) ov[0] / ov[1] : 0;
+                if (c > bestC) { bestC = c; bestS = d; }
+            }
+            prof[i] = bestC; sh[i] = bestS;
+        }
+        if (DEBUG) { StringBuilder b = new StringBuilder(); for (int i = 0; i < n; i += 2) b.append(String.format("%.2f:%.2f/%.0f ", sc[i], prof[i], sh[i])); System.out.println(b); }
+        double minCov = 0.5;
+        int i0 = -1;
+        for (int i = 1; i < n - 1; i++)
+            if (Math.abs(sc[i] - 1) <= 0.025 && isPeak(prof, i, minCov) && (i0 < 0 || prof[i] > prof[i0])) i0 = i;
+        if (i0 < 0) i0 = 28;            // 1.00
+        // 바깥(up)·안쪽(dn) 후보 중 덮임이 가장 큰 봉우리
+        int up = -1, dn = -1;
+        for (int i = 1; i < n - 1; i++) {
+            if (!isPeak(prof, i, minCov)) continue;
+            if (sc[i] >= sc[i0] + 0.03 && (up < 0 || prof[i] > prof[up])) up = i;
+            if (sc[i] <= sc[i0] - 0.03 && (dn < 0 || prof[i] > prof[dn] || (prof[i] == prof[dn] && sc[i] > sc[dn]))) dn = i;
+        }
+        // 관 벽은 보통 얇음 → 안쪽 후보가 충분하면 우선. 바깥 후보는 확실할 때만(주변 잡음이 바깥에 봉우리를 만들기 쉬움)
+        int pick; double gapF;
+        if (dn >= 0 && prof[dn] >= 0.55 && (up < 0 || prof[dn] >= prof[up] - 0.05)) {
+            pick = dn; gapF = sc[i0] - sc[dn]; r.innerSource = 2;
+        } else if (up >= 0 && prof[up] >= 0.7) {
+            pick = i0; gapF = sc[up] - sc[i0]; r.innerSource = 1;
+        } else return;
+        Ellipse e = new Ellipse(e0.cx + ux * sh[pick], e0.cy + uy * sh[pick], e0.a * sc[pick], e0.b * sc[pick], e0.phi);
+        double gap = gapF * e0.a;
+        double[] tols = {Math.min(0.03 * e.a, 0.4 * gap), Math.min(0.015 * e.a, 0.3 * gap)};
+        for (double t : tols) {
+            double[] pts = selectInliers(e, Math.max(t, 0.8), 0.85);
+            if (pts == null) break;
+            Ellipse e2 = fitEllipse(pts, pts.length / 2);
+            if (e2 == null || !plausible(e2, w, h)) break;
+            e = e2;
+        }
+        r.inner = e;
+    }
+
+    private static int[] subsampleOf(int[] idx, int m) {
+        int[] r = new int[m];
+        double st = (double) idx.length / m;
+        for (int i = 0; i < m; i++) r[i] = idx[(int) (i * st)];
+        return r;
+    }
+
+    private static boolean isPeak(double[] p, int i, double min) {
+        return p[i] >= min && p[i] >= p[i - 1] && p[i] >= p[i + 1];
+    }
+
+    /** 타원을 0.85배·1.15배 했을 때의 평균 덮임 비율 (주변 잡음 수준) */
+    private double clutterCov(Ellipse e, int w, int h, int[] idx) {
+        double sum = 0;
+        for (double f : new double[]{0.85, 1.15}) {
+            int[] ov = occVis(new Ellipse(e.cx, e.cy, e.a * f, e.b * f, e.phi), w, h, idx, tolFor(e), null, null);
+            sum += ov[1] > 0 ? (double) ov[0] / ov[1] : 0;
+        }
+        return sum / 2;
     }
 
     private void interiorStats(Ellipse e, int w, int h, Result r) {

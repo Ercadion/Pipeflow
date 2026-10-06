@@ -21,14 +21,6 @@
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="관 두께 (mm) — 촬영되는 바깥 테두리 기준">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editWall" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:inputType="numberDecimal" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent" android:layout_height="wrap_content"
             android:hint="관 경사 (%) — 등류 공식 유속용, 비우면 생략">
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/editSlope" android:layout_width="match_parent"

@@ -91,13 +91,13 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
     private var smallBuf = ByteArray(0)
 
     // 실시간 테두리 검출 (analyzer 스레드)
-    private val detector = LiveRimDetector()
+    // 검출 + 프레임 간 안정화(히스테리시스): 비슷한 타원이 연속으로 나와야 표시/교체 → 널뛰기 방지
+    private val tracker = LiveRimTracker()
     private var lastDetectNs = 0L
-    @Volatile private var smooth: LiveRimDetector.Ellipse? = null   // 센서 방향 원 해상도 좌표
-    private var foundStreak = 0
-    private var missStreak = 0
+    @Volatile private var smooth: LiveRimDetector.Ellipse? = null   // 센서 방향 원 해상도 좌표 (표시용, 안정화됨)
     @Volatile private var locked = false
     private var lastCoverage = 0.0
+    private var lastInnerSource = 0
     private var lastBrightness = 0.0
     private var lastSharpness = 0.0
     private var lastDetectMs = 0.0
@@ -337,20 +337,11 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
                 smallBuf[y * sw + x] = (s / area).toByte()
             }
         }
-        val prior = smooth?.scaled(1.0 / f)
-        val r = detector.detect(smallBuf, sw, sh, if (locked) prior else null)
+        val r = tracker.update(smallBuf, sw, sh)
         lastDetectMs = r.millis
-        if (r.found && r.ellipse != null) {
-            val e = r.ellipse.scaled(f.toDouble())
-            val s = smooth
-            smooth = if (s == null) e else blend(s, e, 0.4)
-            foundStreak++; missStreak = 0
-            lastCoverage = r.coverage; lastBrightness = r.brightness; lastSharpness = r.sharpness
-        } else {
-            missStreak++; foundStreak = 0
-            if (missStreak >= 4) { smooth = null; locked = false }
-        }
-        if (foundStreak >= 2) locked = true
+        if (r.found) { lastCoverage = r.coverage; lastBrightness = r.brightness; lastSharpness = r.sharpness; lastInnerSource = r.innerSource }
+        smooth = tracker.current()?.scaled(f.toDouble())
+        locked = smooth != null
         val sm = smooth
         val bright = if (r.found) r.brightness else meanBrightness(smallBuf)
         runOnUiThread { updateOverlay(sm, w, h, bright) }
@@ -361,14 +352,6 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         var i = 0
         while (i < b.size) { s += (b[i].toInt() and 0xFF); i += 4 }
         return s.toDouble() / max(1, b.size / 4)
-    }
-
-    private fun blend(a: LiveRimDetector.Ellipse, b: LiveRimDetector.Ellipse, k: Double): LiveRimDetector.Ellipse {
-        var dphi = b.phi - a.phi
-        while (dphi > Math.PI / 2) dphi -= Math.PI
-        while (dphi < -Math.PI / 2) dphi += Math.PI
-        return LiveRimDetector.Ellipse(a.cx + k * (b.cx - a.cx), a.cy + k * (b.cy - a.cy),
-            a.a + k * (b.a - a.a), a.b + k * (b.b - a.b), a.phi + k * dphi)
     }
 
     /** 센서 방향 좌표 → 세로(업라이트) 영상 좌표 */
@@ -398,24 +381,19 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
             checks += GuideOverlayView.Check("관 포착", 2, "관 끝단을 화면 가운데에 비추세요")
             ready = false
         } else {
-            val rIn = settings.diameterMm / 2
-            val k = rIn / (rIn + settings.wallMm)
+            // e = 관 내경 테두리 (검출기가 끝단 면의 안쪽 동심 테두리를 골라 줌 → 관 두께 입력 불필요)
             val n = 72
-            val outer = FloatArray(2 * n); val inner = FloatArray(2 * n)
+            val inner = FloatArray(2 * n)
             var inside = true
             val minU = 0.01 * min(uw, uh)
             for (i in 0 until n) {
                 val t = 2 * Math.PI * i / n
-                val po = e.point(t)
-                val pi = LiveRimDetector.Ellipse(e.cx, e.cy, e.a * k, e.b * k, e.phi).point(t)
-                val uo = toUpright(po[0], po[1], w, h, rot)
-                val ui = toUpright(pi[0], pi[1], w, h, rot)
-                if (uo[0] < minU || uo[0] > uw - minU || uo[1] < minU || uo[1] > uh - minU) inside = false
-                outer[2 * i] = (uo[0] * sc + ox).toFloat(); outer[2 * i + 1] = (uo[1] * sc + oy).toFloat()
+                val ui = toUpright(e.point(t)[0], e.point(t)[1], w, h, rot)
+                if (ui[0] < minU || ui[0] > uw - minU || ui[1] < minU || ui[1] > uh - minU) inside = false
                 inner[2 * i] = (ui[0] * sc + ox).toFloat(); inner[2 * i + 1] = (ui[1] * sc + oy).toFloat()
             }
             val uc = toUpright(e.cx, e.cy, w, h, rot)
-            guide.outer = outer; guide.inner = inner
+            guide.outer = null; guide.inner = inner
             guide.centerView = floatArrayOf((uc[0] * sc + ox).toFloat(), (uc[1] * sc + oy).toFloat())
             guide.state = GuideOverlayView.State.LOCKED
 
@@ -423,6 +401,8 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
             val cov = lastCoverage
             checks += GuideOverlayView.Check("관 포착", if (cov >= 0.6) 0 else 1,
                 String.format(Locale.US, "테두리 확인 %.0f%%", cov * 100))
+            checks += GuideOverlayView.Check("내경", 0,
+                if (lastInnerSource == 2) "끝단 면 안쪽 테두리" else if (lastInnerSource == 1) "안쪽 테두리 (바깥 테두리 확인)" else "테두리 하나 → 내경으로 사용")
             val fill = e.a / (min(uw, uh) / 2.0)
             checks += GuideOverlayView.Check("크기", when {
                 fill < 0.45 -> 1; fill > 0.98 -> 1; else -> 0 },

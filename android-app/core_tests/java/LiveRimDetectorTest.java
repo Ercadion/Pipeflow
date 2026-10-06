@@ -11,7 +11,7 @@ import java.io.File;
 public class LiveRimDetectorTest {
     public static void main(String[] args) throws Exception {
         File outDir = new File(args[0]); outDir.mkdirs();
-        LiveRimDetector det = new LiveRimDetector();
+        LiveRimDetector det = new LiveRimDetector(); det.edgeFrac = Double.parseDouble(System.getProperty("ef", "0.20"));
         for (int k = 1; k < args.length; k++) {
             BufferedImage src = ImageIO.read(new File(args[k]));
             int W = src.getWidth(), H = src.getHeight();
@@ -32,12 +32,15 @@ public class LiveRimDetectorTest {
             Result rt = det.detect(gray, w, h, r.found ? r.ellipse : null);   // 추적 모드
             String name = new File(args[k]).getName();
             if (!r.found) {
-                System.out.printf("%s: NOT FOUND (edges=%d, cov=%.2f) %.1fms%n", name, r.edgePoints, r.coverage, r.millis);
+                System.out.printf("%s: NOT FOUND (edges=%d, cov=%.2f dist=%.2f) %.1fms%n", name, r.edgePoints, r.coverage, r.distinct, r.millis);
             } else {
                 Ellipse e = r.ellipse.scaled(1 / s);
-                System.out.printf("%s: cx=%.1f cy=%.1f a=%.1f b=%.1f phi=%.1f ratio=%.3f cov=%.2f bright=%.0f sharp=%.1f | global %.1fms, tracked %.1fms (cov %.2f, tracked=%b)%n",
-                        name, e.cx, e.cy, e.a, e.b, Math.toDegrees(e.phi), e.b / e.a, r.coverage, r.brightness, r.sharpness,
+                System.out.printf("%s: cx=%.1f cy=%.1f a=%.1f b=%.1f phi=%.1f ratio=%.3f cov=%.2f dist=%.2f bright=%.0f sharp=%.1f | global %.1fms, tracked %.1fms (cov %.2f, tracked=%b)%n",
+                        name, e.cx, e.cy, e.a, e.b, Math.toDegrees(e.phi), e.b / e.a, r.coverage, r.distinct, r.brightness, r.sharpness,
                         r.millis, rt.millis, rt.coverage, rt.tracked);
+                Ellipse in = r.inner.scaled(1 / s);
+                System.out.printf("    inner(src=%d): cx=%.1f cy=%.1f a=%.1f b=%.1f phi=%.1f  (inner/outer a = %.3f)%n",
+                        r.innerSource, in.cx, in.cy, in.a, in.b, Math.toDegrees(in.phi), in.a / e.a);
             }
             // 오버레이
             BufferedImage vis = new BufferedImage(W, H, BufferedImage.TYPE_INT_RGB);
@@ -47,7 +50,7 @@ public class LiveRimDetectorTest {
             if (r.found) {
                 Ellipse e = r.ellipse.scaled(1 / s);
                 g.setColor(Color.GREEN); drawEll(g, e);
-                g.setColor(Color.RED); drawEll(g, new Ellipse(e.cx, e.cy, e.a * 50 / 54, e.b * 50 / 54, e.phi));
+                g.setColor(Color.RED); drawEll(g, r.inner.scaled(1 / s));
             }
             g.dispose();
             BufferedImage out = new BufferedImage(W / 3, H / 3, BufferedImage.TYPE_INT_RGB);
