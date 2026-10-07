@@ -12,8 +12,16 @@ android {
         applicationId = "io.github.ercadion.pipeflow"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.3.4"
+        // 앱 버전 → android-app/version.properties 의 versionName (직접 수정). 코드에서는 BuildConfig.VERSION_NAME
+        //   측정 폴더 이름·meta.json·결과에 자동 기록
+        // versionCode(설치 시 새 버전 판단용 정수)는 자동: GitHub Actions 실행 번호 + 100 (PC 빌드는 50)
+        val verProps = java.util.Properties().apply {
+            rootProject.file("version.properties").takeIf { it.exists() }?.reader(Charsets.UTF_8)?.use { load(it) }
+        }
+        versionName = verProps.getProperty("versionName", "0.0.0").trim()
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(100) ?: 50
+        // 빌드한 커밋: GitHub Actions 는 GITHUB_SHA 환경변수 제공, PC 빌드는 "local"
+        buildConfigField("String", "GIT_SHA", "\"${(System.getenv("GITHUB_SHA") ?: "local").take(7)}\"")
         ndk {
             // 실제 폰(arm64) + 에뮬레이터(x86_64)
             abiFilters += listOf("arm64-v8a", "x86_64")

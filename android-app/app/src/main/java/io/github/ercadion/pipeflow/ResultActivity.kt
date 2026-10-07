@@ -4,6 +4,9 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
+import androidx.appcompat.app.AlertDialog
 import android.view.View
 import android.widget.Button
 import android.widget.ProgressBar
@@ -30,17 +33,21 @@ class ResultActivity : AppCompatActivity() {
     private lateinit var btnEdit: Button
     private lateinit var btnRerun: Button
     private lateinit var editNote: TextInputEditText
+    private lateinit var editTruthDepth: TextInputEditText
+    private lateinit var editTruthV: TextInputEditText
+    private lateinit var editTruthQ: TextInputEditText
     private val worker = Executors.newSingleThreadExecutor()
     private var last: JSONObject? = null
     /** 처음 자동 결과 (result_auto.json) — 사람 수정 전 값. 화면을 다시 열어도 이 파일에서 읽음 */
     @Volatile private var autoResult: JSONObject? = null
     private var running = false
+    private var deleted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_result)
         dir = File(intent.getStringExtra(EXTRA_DIR)!!)
-        title = "측정 ${dir.name}"
+        title = "측정 ${SessionStore.id(dir)}"
         img = findViewById(R.id.imgOverlay)
         txtResult = findViewById(R.id.txtResult)
         txtProgress = findViewById(R.id.txtProgress)
@@ -48,9 +55,16 @@ class ResultActivity : AppCompatActivity() {
         btnEdit = findViewById(R.id.btnEdit)
         btnRerun = findViewById(R.id.btnRerun)
         editNote = findViewById(R.id.editNote)
+        editTruthDepth = findViewById(R.id.editTruthDepth)
+        editTruthV = findViewById(R.id.editTruthV)
+        editTruthQ = findViewById(R.id.editTruthQ)
 
         loadStillBitmap()
-        SessionStore.readJson(File(dir, "labels.json"))?.optString("note")?.let { editNote.setText(it) }
+        SessionStore.readJson(File(dir, "labels.json"))?.let { lb ->
+            editNote.setText(lb.optString("note"))
+            fun put(e: TextInputEditText, k: String) { if (lb.has(k)) e.setText(lb.optDouble(k).toString()) }
+            put(editTruthDepth, "truth_depth_mm"); put(editTruthV, "truth_v_mean_mps"); put(editTruthQ, "truth_Q_Lps")
+        }
         migrateLegacy()
         autoResult = SessionStore.readJson(File(dir, "result_auto.json"))
 
@@ -73,8 +87,10 @@ class ResultActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        if (deleted) return
         val note = editNote.text?.toString() ?: ""
         if (note.isNotEmpty()) SessionStore.writeLabels(dir) { it.put("note", note) }
+        saveTruth()
     }
 
     /** still.y (Y 평면) → 회전 → 회색조 Bitmap */
@@ -106,6 +122,8 @@ class ResultActivity : AppCompatActivity() {
         val meta = SessionStore.readJson(File(dir, "meta.json"))
         val params = meta?.optJSONObject("params") ?: Settings.load(this).toParams()
         val kind = when { redetect -> "rim_redetect"; manual != null -> "manual_waterline"; else -> "auto" }
+        params.put("app_version", BuildConfig.VERSION_NAME)      // 결과에 엔진(앱) 버전 기록
+        params.put("app_build", BuildConfig.GIT_SHA)
         val before = last
         if (redetect) {
             // 실시간 포착 타원을 쓰지 않고 전체 영상에서 RANSAC 으로 다시 찾기
@@ -215,8 +233,43 @@ class ResultActivity : AppCompatActivity() {
         for (i in 0 until arr.length()) sb.append("   ⚠ ").append(arr.getString(i)).append("\n")
     }
 
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.result_menu, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == R.id.menu_delete) { confirmDelete(); return true }
+        return super.onOptionsItemSelected(item)
+    }
+
+    /** 이 측정 삭제 (원본·결과·라벨 모두, 확인 후) */
+    private fun confirmDelete() {
+        if (running) { Toast.makeText(this, "계산이 끝난 뒤 삭제하세요", Toast.LENGTH_SHORT).show(); return }
+        AlertDialog.Builder(this)
+            .setTitle("이 측정 삭제")
+            .setMessage("${SessionStore.id(dir)}\n원본 영상·결과·라벨이 모두 지워지고 되돌릴 수 없습니다.")
+            .setPositiveButton("삭제") { _, _ ->
+                deleted = true
+                if (SessionStore.delete(this, dir)) {
+                    Toast.makeText(this, "삭제했습니다", Toast.LENGTH_SHORT).show(); finish()
+                } else Toast.makeText(this, "삭제 실패", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null).show()
+    }
+
+    /** 실측값 입력칸 → labels.truth_* (비우면 삭제) */
+    private fun saveTruth() {
+        val lb = SessionStore.readJson(File(dir, "labels.json")) ?: JSONObject()
+        val vals = listOf("truth_depth_mm" to editTruthDepth, "truth_v_mean_mps" to editTruthV, "truth_Q_Lps" to editTruthQ)
+            .map { (k, e) -> k to e.text?.toString()?.trim()?.replace(',', '.')?.toDoubleOrNull() }
+        if (vals.all { (k, v) -> (v == null && !lb.has(k)) || (v != null && lb.has(k) && lb.optDouble(k) == v) }) return
+        SessionStore.writeLabels(dir) { o -> vals.forEach { (k, v) -> if (v != null) o.put(k, v) else o.remove(k) } }
+    }
+
     /** 처음 자동 결과(사람 수정 전)가 맞았는지 */
     private fun labelAuto(v: String) {
+        saveTruth()
         SessionStore.writeLabels(dir) {
             it.put("auto_feedback", v)
             it.put("auto_feedback_ms", System.currentTimeMillis())
@@ -227,6 +280,7 @@ class ResultActivity : AppCompatActivity() {
 
     /** 사람이 수정한 최종 결과가 맞는지 — 최종 수면선·테두리·수심을 함께 기록 */
     private fun labelFinal(v: String) {
+        saveTruth()
         val r = last
         SessionStore.writeLabels(dir) {
             it.put("final_feedback", v)
@@ -314,6 +368,7 @@ class ResultActivity : AppCompatActivity() {
     }
 
     private fun export() {
+        saveTruth()
         SessionStore.writeLabels(dir) { it.put("note", editNote.text?.toString() ?: "") }
         worker.execute {
             val zip = SessionStore.zip(this, dir)

@@ -2,6 +2,8 @@ package io.github.ercadion.pipeflow
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.Spinner
@@ -51,7 +53,7 @@ class MainActivity : AppCompatActivity() {
             st.save(this)
             startActivity(Intent(this, CaptureActivity::class.java))
         }
-        findViewById<Button>(R.id.btnHistory).setOnClickListener { showHistory() }
+        findViewById<Button>(R.id.btnHistory).setOnClickListener { openData() }
         findViewById<TextView>(R.id.txtInfo).text =
             "버전 ${BuildConfig.VERSION_NAME} · 측정 데이터 저장 위치: ${SessionStore.root(this).absolutePath}"
     }
@@ -71,25 +73,15 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun showHistory() {
-        val sessions = SessionStore.list(this)
-        if (sessions.isEmpty()) { Toast.makeText(this, "측정 기록이 없습니다", Toast.LENGTH_SHORT).show(); return }
-        val labels = sessions.map { dir -> describe(dir) }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("측정 기록 (${sessions.size})")
-            .setItems(labels) { _, i ->
-                startActivity(Intent(this, ResultActivity::class.java)
-                    .putExtra(ResultActivity.EXTRA_DIR, sessions[i].absolutePath))
-            }.setNegativeButton("닫기", null).show()
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main_menu, menu)
+        return true
     }
 
-    private fun describe(dir: File): String {
-        val r = SessionStore.readJson(File(dir, "result.json"))
-        val lv = r?.optJSONObject("level")
-        val st = r?.optJSONObject("velocity_stiv")
-        val parts = mutableListOf(dir.name)
-        lv?.let { parts += String.format(Locale.US, "h=%.1fmm", it.optDouble("depth_mm")) }
-        st?.let { parts += String.format(Locale.US, "v=%.3fm/s", it.optDouble("v_surface_mps")) }
-        if (r == null) parts += "(미분석)"
-        return parts.joinToString("  ")
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == R.id.menu_data) { openData(); return true }
+        return super.onOptionsItemSelected(item)
     }
+
+    private fun openData() = startActivity(Intent(this, DataActivity::class.java))
 }

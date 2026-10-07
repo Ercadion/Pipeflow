@@ -67,6 +67,31 @@
             </LinearLayout>
         </LinearLayout>
 
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="실측값 (알면 입력 — 학습 정답·버전 비교의 기준이 됩니다)" />
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="실측 수심 (mm, 자로 잰 값)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editTruthDepth" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:inputType="numberDecimal|numberSigned" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="실측 평균유속 (m/s, 유량계 등)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editTruthV" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:inputType="numberDecimal|numberSigned" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="실측 유량 (L/s)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editTruthQ" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:inputType="numberDecimal|numberSigned" />
+        </com.google.android.material.textfield.TextInputLayout>
+
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:hint="참값 메모 (예: 자로 잰 수심 42mm, 유량계 0.31 m/s)">

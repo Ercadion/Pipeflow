@@ -6,6 +6,7 @@
   still.y     첫 프레임 Y(밝기) 평면, 원 해상도, uint8 (센서 방향 그대로)
   frames.y    연속 프레임 Y 평면 (T × h × w, uint8, 1/2 해상도)
   result.json 분석 결과 (이 모듈이 작성)
+  eval_<버전>.json  개발자 PC 의 tools/reeval.py 가 쓰는 엔진 버전별 재분석 결과 (params.result_name, 앱은 사용 안 함)
   labels.json 사용자 확인/수정 내용 (Kotlin 이 작성) — 향후 신경망 학습 데이터
 
 analyze(session_dir, params_json, listener) -> result JSON 문자열
@@ -15,6 +16,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import time
 import traceback
 
@@ -72,9 +74,14 @@ def _expected_roll_deg(gravity):
 
 def analyze(session_dir, params_json="{}", listener=None):
     t0 = time.time()
-    out = dict(ok=False, version="0.3.3")
+    out = dict(ok=False, version="unknown")   # 앱이 params.app_version 으로 실제 버전을 넘김
+    p = {}
     try:
         p = json.loads(params_json) if params_json else {}
+        if p.get("app_version"):
+            out["version"] = str(p["app_version"])
+        if p.get("app_build"):
+            out["build"] = str(p["app_build"])
         with open(os.path.join(session_dir, "meta.json"), encoding="utf-8") as f:
             meta = json.load(f)
         out["session"] = os.path.basename(session_dir.rstrip("/"))
@@ -185,8 +192,11 @@ def analyze(session_dir, params_json="{}", listener=None):
         out["error"] = f"{type(e).__name__}: {e}"
         out["traceback"] = traceback.format_exc()
     out["t_total_s"] = round(time.time() - t0, 2)
+    name = str(p.get("result_name") or "result.json")
+    if not re.fullmatch(r"[\w.\-]+\.json", name):
+        name = "result.json"
     try:
-        with open(os.path.join(session_dir, "result.json"), "w", encoding="utf-8") as f:
+        with open(os.path.join(session_dir, name), "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=1, default=float)
     except Exception:
         pass

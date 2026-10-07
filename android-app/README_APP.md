@@ -6,7 +6,8 @@
 ```
 android-app/
 ├─ app/src/main/java/io/github/ercadion/pipeflow/   Kotlin
-│   ├─ MainActivity      설정 입력 (내경·경사·재질·fps·촬영시간), 측정 기록
+│   ├─ MainActivity      설정 입력 (내경·경사·재질·fps·촬영시간), 메뉴 → 측정 데이터
+│   ├─ DataActivity      측정 데이터 목록·선택 내보내기(zip)·삭제
 │   ├─ CaptureActivity   카메라 미리보기 + 원 가이드 + 녹화 (Y 평면 직접 저장, 실제 타임스탬프, 중력센서)
 │   ├─ ResultActivity    결과 표시, 수면선 드래그 수정 → 재계산, 맞음/틀림 라벨, zip 내보내기
 │   ├─ CameraIntrinsics  Camera2 정보로 초점거리(px)·주점 계산 → 체스보드 없이 완전투시
@@ -109,6 +110,19 @@ Chaquopy 가 PC의 Python 3.10 으로 numpy 를 받아 넣으므로 Python 3.10 
 - 자동 수면선 좌표는 화면 메모리가 아니라 `result_auto.json` 에서 읽음 → 결과 화면을 닫았다 다시 열어 여러 번 고쳐도 자동 기록이 덮어써지지 않음
 - 예전 세션: 처음 열 때 수정 흔적이 없으면 지금 결과를 `result_auto.json` 으로 보존, 이미 수정된 세션은 `legacy_auto_result_lost` 로 표시
 - `tools/sessions_to_dataset.py`: `auto_*`(처음 자동) / `final_*`(최종) 수심·유속·유량을 나란히, `depth_change_mm`, `edited`, `edit_types`, `n_runs`, `auto_feedback`, `final_feedback`, `feedback_legacy` 열 추가
+
+### v0.3.5 — 측정 데이터 관리 화면, 폴더 이름에 앱 버전, 실측값 입력
+- **저장 구조**: `sessions/<촬영날짜>/<촬영시각>_v<앱버전>/` (예: `sessions/20261007/192009_v0.3.5/`) — 날짜 폴더 하나에 그날 측정이 모임. 예전 측정(`sessions/20261005_221530/`)도 그대로 함께 표시
+- **앱 버전**: `android-app/version.properties` 의 `versionName` 을 배포(커밋)할 때 직접 수정 → 폴더 이름·`meta.json`(`app_version`)·결과(`version`)·첫 화면에 자동 기록
+  - 설치 업데이트 번호(versionCode)는 GitHub Actions 실행 번호 + 100 으로 자동 (PC 빌드 50)
+  - 빌드한 커밋도 `app_build`/`build` 로 자동 기록 (Actions 빌드면 커밋 해시 7자리, PC 빌드는 `local`) → 버전 숫자를 안 올려도 어떤 코드로 측정했는지 구분됨
+- **측정 데이터 화면** (첫 화면 오른쪽 위 메뉴 **측정 데이터**, 또는 첫 화면 버튼)
+  - 목록: 촬영 시각·앱 버전, 수심·표면유속, 수정함/실측값/자동 맞음·틀림 표시, 크기
+  - 결과 화면 오른쪽 위 메뉴(⋮) → **이 측정 삭제**
+  - 항목 누르기 → 결과 화면, 체크박스로 선택 → **선택 내보내기**(zip 하나로 묶어 드라이브·메일·메신저 공유) / **선택 삭제**(확인 후, 되돌릴 수 없음)
+  - 데이터는 앱 저장소(`Android/data/io.github.ercadion.pipeflow/files/sessions/`)에 저장
+- **결과 화면 실측값 입력**: 실측 수심(mm)·평균유속(m/s)·유량(L/s) → `labels.json` 의 `truth_*` (학습 정답·엔진 점검 기준)
+- **엔진 점검(배포 전, 개발자 PC)**: `tools/README.md` 참고 — 내보낸 zip 을 모아 새 엔진과 배포 엔진으로 최근 N건 재분석·비교 (앱 사용자 화면에는 없음)
 
 ## 데이터 → 신경망 (다음 단계)
 모든 측정은 `Android/data/io.github.ercadion.pipeflow/files/sessions/` 에 세션 폴더로 남고, zip 으로 내보낼 수 있습니다.

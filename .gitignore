@@ -3,3 +3,5 @@ __pycache__/
 scratch/
 out/
 *.zip
+devdata/
+dataset/

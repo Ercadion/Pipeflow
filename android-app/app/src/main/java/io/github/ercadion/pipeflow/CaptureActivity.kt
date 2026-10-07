@@ -555,7 +555,8 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         framesOut?.flush(); framesOut?.close(); framesOut = null
         val dir = sessionDir ?: return
         val meta = JSONObject()
-        meta.put("app_version", BuildConfig.VERSION_NAME)
+        meta.put("app_version", BuildConfig.VERSION_NAME)      // build.gradle.kts 의 versionName
+        meta.put("app_build", BuildConfig.GIT_SHA)              // 빌드한 커밋 (GitHub Actions 빌드면 커밋 해시 앞 7자리)
         meta.put("device", "${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE})")
         meta.put("rotation_degrees", rotation)
         meta.put("still", JSONObject().put("file", "still.y").put("width", stillW).put("height", stillH))
