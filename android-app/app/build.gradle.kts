@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.ercadion.pipeflow"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.3.3"
+        versionCode = 6
+        versionName = "0.3.4"
         ndk {
             // 실제 폰(arm64) + 에뮬레이터(x86_64)
             abiFilters += listOf("arm64-v8a", "x86_64")

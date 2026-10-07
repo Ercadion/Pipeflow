@@ -7,8 +7,13 @@
   dataset/images/<세션>.png        첫 프레임(회전 보정된 회색조)
   dataset/sti/<세션>_line<k>.npy   측정선별 시공간영상 (유속 모델용, --sti 옵션)
   dataset/index.csv               세션별 라벨 (테두리 타원, 수면선 자동/수동, 수심, 유속, 피드백, 메모)
+                                  + 처음 자동 결과(auto_*) 와 사람 수정 후 최종 결과(final_*) 를 나란히
 
-라벨 우선순위: 사용자가 수정한 수면선(manual_waterline) > 자동 결과 + feedback=correct
+세션 파일 (앱 v0.3.4~)
+  result_auto.json  처음 자동 결과 (사람 수정 전, 고정)    result.json  가장 최근(최종) 결과
+  runs.json         분석 회차 기록                         labels.json  auto_feedback / final_feedback / edits / 메모
+라벨 우선순위: 사용자가 수정한 수면선(manual_waterline) > 자동 결과 + auto_feedback=correct
+(예전 세션의 feedback 은 '자동' 인지 '최종' 인지 모호 → feedback_legacy 열에 그대로)
 """
 import argparse, csv, glob, json, os, shutil, sys, tempfile, zipfile
 
@@ -20,7 +25,20 @@ def load_session(d):
     meta = json.load(open(os.path.join(d, "meta.json"), encoding="utf-8"))
     res = json.load(open(os.path.join(d, "result.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "result.json")) else {}
     lab = json.load(open(os.path.join(d, "labels.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "labels.json")) else {}
-    return meta, res, lab
+    p_auto = os.path.join(d, "result_auto.json")
+    auto = json.load(open(p_auto, encoding="utf-8")) if os.path.exists(p_auto) else None
+    p_runs = os.path.join(d, "runs.json")
+    runs = json.load(open(p_runs, encoding="utf-8")) if os.path.exists(p_runs) else []
+    return meta, res, lab, auto, runs
+
+
+def _summary(r):
+    """결과 json → (수심, 표면유속, STIV 유량, 등류공식 유량, 수면선 4값, 타원)"""
+    if not r or not r.get("ok", True):
+        return dict(depth=None, v=None, q=None, q_formula=None, wl=None, ell=None)
+    lv, st, vf, ov = r.get("level", {}), r.get("velocity_stiv", {}), r.get("velocity_formula", {}), r.get("overlay", {})
+    return dict(depth=lv.get("depth_mm"), v=st.get("v_surface_mps"), q=st.get("Q_Lps"), q_formula=vf.get("Q_Lps"),
+                wl=sum(ov.get("waterline", []), []) or None, ell=ov.get("ellipse"))
 
 
 def still_image(d, meta):
@@ -52,25 +70,51 @@ def main():
         if not os.path.exists(os.path.join(d, "meta.json")):
             continue
         name = os.path.basename(d.rstrip("/"))
-        meta, res, lab = load_session(d)
+        meta, res, lab, auto, runs = load_session(d)
         img = still_image(d, meta)
         Image.fromarray(img).save(os.path.join(a.out, "images", name + ".png"))
-        ov = res.get("overlay", {})
-        ell = ov.get("ellipse", {})
-        wl_auto = lab.get("auto_waterline") or sum(ov.get("waterline", []), [])
-        wl_final = lab.get("manual_waterline") or lab.get("final_waterline") or wl_auto
+        if auto is None and not lab.get("manual_waterline") and not lab.get("edits") \
+                and not lab.get("legacy_auto_result_lost") and res.get("level", {}).get("rim_source") != "manual_or_previous":
+            auto = res                                 # 예전 세션: 수정 흔적이 없으면 현재 결과 = 자동 결과
+        A, Fn = _summary(auto), _summary(res)       # 처음 자동 / 최종
+        ell = Fn["ell"] or {}
+        wl_auto = (A["wl"] if auto else None) or lab.get("auto_waterline") or Fn["wl"] or []
+        wl_final = lab.get("manual_waterline") or lab.get("final_waterline") or Fn["wl"] or wl_auto
+        edits = lab.get("edits", [])
+        changed = [e for e in edits if e.get("changed", True)]
+        edited = bool(lab.get("manual_waterline")) or bool(changed)
+        auto_fb = lab.get("auto_feedback", "")
+        if lab.get("manual_waterline"):
+            src = "manual"
+        elif auto_fb == "correct":
+            src = "auto_confirmed"
+        elif edited and lab.get("final_feedback") == "correct":
+            src = "final_confirmed"
+        elif not edited and lab.get("feedback") == "correct":
+            src = "auto_confirmed_legacy"
+        else:
+            src = "auto_unverified"
+        def diff(x, y):
+            return None if x is None or y is None else round(y - x, 3)
         lv = res.get("level", {})
-        st = res.get("velocity_stiv", {})
         rows.append(dict(
             session=name, image=f"images/{name}.png", width=img.shape[1], height=img.shape[0],
-            diameter_mm=meta.get("params", {}).get("diameter_mm"), wall_mm=meta.get("params", {}).get("wall_mm"),
+            diameter_mm=meta.get("params", {}).get("diameter_mm"),
             ell_cx=ell.get("cx"), ell_cy=ell.get("cy"), ell_a=ell.get("a"), ell_b=ell.get("b"), ell_phi_deg=ell.get("phi_deg"),
+            ell_auto=json.dumps(A["ell"]) if auto else "",
             wl_auto=json.dumps(wl_auto), wl_label=json.dumps(wl_final),
-            label_source="manual" if lab.get("manual_waterline") else ("auto_confirmed" if lab.get("feedback") == "correct" else "auto_unverified"),
-            feedback=lab.get("feedback", ""), note=lab.get("note", ""),
-            depth_mm=lv.get("depth_mm"), method=lv.get("method"),
-            v_surface_mps=st.get("v_surface_mps"), fps=st.get("fps"),
-            f_px=(meta.get("intrinsics") or {}).get("f_px"), device=meta.get("device", ""),
+            label_source=src, edited=edited,
+            edit_types="|".join(sorted({e.get("type", "") for e in changed})), n_runs=len(runs),
+            auto_feedback=auto_fb, final_feedback=lab.get("final_feedback", ""), feedback_legacy=lab.get("feedback", ""),
+            note=lab.get("note", ""),
+            auto_result_available=auto is not None, legacy_auto_result_lost=bool(lab.get("legacy_auto_result_lost")),
+            # 처음 자동 결과 vs 사람 수정 후 최종 결과
+            auto_depth_mm=A["depth"], final_depth_mm=Fn["depth"], depth_change_mm=diff(A["depth"], Fn["depth"]),
+            auto_v_surface_mps=A["v"], final_v_surface_mps=Fn["v"],
+            auto_Q_Lps=A["q"], final_Q_Lps=Fn["q"], auto_Q_formula_Lps=A["q_formula"], final_Q_formula_Lps=Fn["q_formula"],
+            depth_mm=Fn["depth"], method=lv.get("method"), rim_source=lv.get("rim_source"), inner_source=lv.get("inner_source"),
+            v_surface_mps=Fn["v"], fps=res.get("velocity_stiv", {}).get("fps"),
+            f_px=(meta.get("intrinsics") or {}).get("f_px"), zoom_ratio=meta.get("zoom_ratio"), device=meta.get("device", ""),
             gravity=json.dumps(meta.get("gravity"))))
     if rows:
         with open(os.path.join(a.out, "index.csv"), "w", newline="", encoding="utf-8-sig") as f:

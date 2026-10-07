@@ -99,6 +99,17 @@ Chaquopy 가 PC의 Python 3.10 으로 numpy 를 받아 넣으므로 Python 3.10 
 - 분석: 촬영 시 검사 범위는 `meta.touch_roi` 로 기록(참고용)
 - 데스크톱 PyTorch 버전도 관 두께 입력을 없애고 같은 내경 자동 선택 사용 (`--wall` 삭제)
 
+### v0.3.4 — 자동 결과와 사람 수정 결과를 모두 보존
+- 측정 폴더 파일
+  - `result_auto.json`: **처음 자동 결과**(사람 수정 전). 한 번 저장되면 다시 계산해도 바뀌지 않음
+  - `result.json`: 가장 최근(최종) 결과
+  - `runs.json`: 분석 회차 기록 — 회차마다 종류(auto / manual_waterline / rim_redetect), 시각, 입력(수면선·타원·실시간 타원 사용 여부), 결과 전체
+  - `labels.json`: `auto_feedback`(처음 자동 결과가 맞았나), `final_feedback`(수정한 최종 결과가 맞나 + 그때의 수면선·타원·수심), `edits`(수정 이력: 종류, 수정 전/후 수면선 또는 타원, 수정 전/후 수심, 실제로 바뀌었는지), `auto_waterline`/`manual_waterline`, 메모
+- 결과 화면: 수정한 경우 "처음 자동 결과: 수심 … · 유속 … · 유량 …" 을 함께 표시하고, "수정한 최종 결과가 맞나요?" 버튼이 추가로 나타남. 위쪽 버튼은 "처음 자동 결과(수정 전)가 맞았나요?"
+- 자동 수면선 좌표는 화면 메모리가 아니라 `result_auto.json` 에서 읽음 → 결과 화면을 닫았다 다시 열어 여러 번 고쳐도 자동 기록이 덮어써지지 않음
+- 예전 세션: 처음 열 때 수정 흔적이 없으면 지금 결과를 `result_auto.json` 으로 보존, 이미 수정된 세션은 `legacy_auto_result_lost` 로 표시
+- `tools/sessions_to_dataset.py`: `auto_*`(처음 자동) / `final_*`(최종) 수심·유속·유량을 나란히, `depth_change_mm`, `edited`, `edit_types`, `n_runs`, `auto_feedback`, `final_feedback`, `feedback_legacy` 열 추가
+
 ## 데이터 → 신경망 (다음 단계)
 모든 측정은 `Android/data/io.github.ercadion.pipeflow/files/sessions/` 에 세션 폴더로 남고, zip 으로 내보낼 수 있습니다.
 ```

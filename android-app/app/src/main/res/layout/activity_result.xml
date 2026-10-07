@@ -39,7 +39,7 @@
 
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="자동 검출이 맞았나요? (학습 데이터로 저장됩니다)" />
+            android:text="처음 자동 결과(수정 전)가 맞았나요? (학습 데이터로 저장됩니다)" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal">
             <Button android:id="@+id/btnGood" style="?attr/materialButtonOutlinedStyle"
@@ -49,6 +49,22 @@
                 android:layout_width="0dp" android:layout_weight="1"
                 android:layout_height="wrap_content" android:layout_marginStart="8dp"
                 android:text="틀림" />
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/boxFinal" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:text="수정한 최종 결과가 맞나요?" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <Button android:id="@+id/btnFinalGood" style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:text="맞음" />
+                <Button android:id="@+id/btnFinalBad" style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                    android:text="틀림" />
+            </LinearLayout>
         </LinearLayout>
 
         <com.google.android.material.textfield.TextInputLayout

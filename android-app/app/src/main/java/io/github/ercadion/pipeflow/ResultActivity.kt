@@ -17,6 +17,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.math.abs
 
 class ResultActivity : AppCompatActivity() {
     companion object { const val EXTRA_DIR = "dir" }
@@ -31,7 +32,8 @@ class ResultActivity : AppCompatActivity() {
     private lateinit var editNote: TextInputEditText
     private val worker = Executors.newSingleThreadExecutor()
     private var last: JSONObject? = null
-    private var autoWaterline: DoubleArray? = null
+    /** 처음 자동 결과 (result_auto.json) — 사람 수정 전 값. 화면을 다시 열어도 이 파일에서 읽음 */
+    @Volatile private var autoResult: JSONObject? = null
     private var running = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,6 +51,8 @@ class ResultActivity : AppCompatActivity() {
 
         loadStillBitmap()
         SessionStore.readJson(File(dir, "labels.json"))?.optString("note")?.let { editNote.setText(it) }
+        migrateLegacy()
+        autoResult = SessionStore.readJson(File(dir, "result_auto.json"))
 
         btnEdit.setOnClickListener {
             img.editMode = !img.editMode
@@ -57,8 +61,10 @@ class ResultActivity : AppCompatActivity() {
         }
         btnRerun.setOnClickListener { run(manual = img.waterline?.clone()) }
         findViewById<Button>(R.id.btnRedetect).setOnClickListener { run(manual = null, redetect = true) }
-        findViewById<Button>(R.id.btnGood).setOnClickListener { label("correct") }
-        findViewById<Button>(R.id.btnBad).setOnClickListener { label("wrong") }
+        findViewById<Button>(R.id.btnGood).setOnClickListener { labelAuto("correct") }
+        findViewById<Button>(R.id.btnBad).setOnClickListener { labelAuto("wrong") }
+        findViewById<Button>(R.id.btnFinalGood).setOnClickListener { labelFinal("correct") }
+        findViewById<Button>(R.id.btnFinalBad).setOnClickListener { labelFinal("wrong") }
         findViewById<Button>(R.id.btnExport).setOnClickListener { export() }
 
         val prev = SessionStore.readJson(File(dir, "result.json"))
@@ -99,21 +105,21 @@ class ResultActivity : AppCompatActivity() {
         txtProgress.text = "계산 준비 중… (처음 실행 시 Python 로딩에 몇 초 걸림)"
         val meta = SessionStore.readJson(File(dir, "meta.json"))
         val params = meta?.optJSONObject("params") ?: Settings.load(this).toParams()
+        val kind = when { redetect -> "rim_redetect"; manual != null -> "manual_waterline"; else -> "auto" }
+        val before = last
         if (redetect) {
             // 실시간 포착 타원을 쓰지 않고 전체 영상에서 RANSAC 으로 다시 찾기
             params.put("use_live_ellipse", false)
-            autoWaterline = null
         }
         if (manual != null) {
             params.put("waterline_pts", JSONArray().put(JSONArray(listOf(manual[0], manual[1])))
                 .put(JSONArray(listOf(manual[2], manual[3]))))
             // 테두리는 이전 결과 재사용 (빠름)
             last?.optJSONObject("overlay")?.optJSONObject("ellipse")?.let { params.put("ellipse", it) }
-            SessionStore.writeLabels(dir) { lb ->
-                lb.put("manual_waterline", JSONArray(manual.toList()))
-                autoWaterline?.let { lb.put("auto_waterline", JSONArray(it.toList())) }
-            }
         }
+        val inputs = JSONObject().put("use_live_ellipse", params.optBoolean("use_live_ellipse", true))
+        params.optJSONArray("waterline_pts")?.let { inputs.put("waterline_pts", it) }
+        params.optJSONObject("ellipse")?.let { inputs.put("ellipse", it) }
         worker.execute {
             val t0 = System.currentTimeMillis()
             val res = try {
@@ -121,6 +127,7 @@ class ResultActivity : AppCompatActivity() {
             } catch (e: Throwable) {
                 JSONObject().put("ok", false).put("error", e.toString())
             }
+            record(kind, inputs, before, manual, res)
             runOnUiThread {
                 running = false
                 progress.visibility = View.GONE; btnRerun.isEnabled = true
@@ -145,10 +152,19 @@ class ResultActivity : AppCompatActivity() {
             val arr = doubleArrayOf(wl.getJSONArray(0).getDouble(0), wl.getJSONArray(0).getDouble(1),
                 wl.getJSONArray(1).getDouble(0), wl.getJSONArray(1).getDouble(1))
             img.waterline = arr
-            if (autoWaterline == null) autoWaterline = arr.clone()
         }
         val sb = StringBuilder()
         val lv = r.getJSONObject("level")
+        val edited = differs(autoResult, r)
+        findViewById<View>(R.id.boxFinal).visibility = if (edited) View.VISIBLE else View.GONE
+        autoResult?.takeIf { edited }?.let { a ->
+            val al = a.optJSONObject("level")
+            val av = a.optJSONObject("velocity_stiv")
+            sb.append(String.format(Locale.US, "□ 처음 자동 결과: 수심 %.1f mm", al?.optDouble("depth_mm") ?: Double.NaN))
+            if (av != null) sb.append(String.format(Locale.US, " · 표면유속 %.3f m/s · 유량 %.3f L/s",
+                av.optDouble("v_surface_mps"), av.optDouble("Q_Lps")))
+            sb.append("  → 아래는 수정 후 결과\n\n")
+        }
         val D = lv.optDouble("diameter_mm")
         sb.append(String.format(Locale.US, "■ 수심  %.1f mm  (충만율 %.1f%%, 내경 %.0f mm)\n",
             lv.optDouble("depth_mm"), lv.optDouble("fill_ratio") * 100, D))
@@ -199,13 +215,102 @@ class ResultActivity : AppCompatActivity() {
         for (i in 0 until arr.length()) sb.append("   ⚠ ").append(arr.getString(i)).append("\n")
     }
 
-    private fun label(v: String) {
+    /** 처음 자동 결과(사람 수정 전)가 맞았는지 */
+    private fun labelAuto(v: String) {
         SessionStore.writeLabels(dir) {
-            it.put("feedback", v)
+            it.put("auto_feedback", v)
+            it.put("auto_feedback_ms", System.currentTimeMillis())
+            it.put("note", editNote.text?.toString() ?: "")
+        }
+        Toast.makeText(this, "저장했습니다 (처음 자동 결과: ${if (v == "correct") "맞음" else "틀림"})", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 사람이 수정한 최종 결과가 맞는지 — 최종 수면선·테두리·수심을 함께 기록 */
+    private fun labelFinal(v: String) {
+        val r = last
+        SessionStore.writeLabels(dir) {
+            it.put("final_feedback", v)
+            it.put("final_feedback_ms", System.currentTimeMillis())
+            it.put("final_run", SessionStore.runCount(dir))
             it.put("note", editNote.text?.toString() ?: "")
             img.waterline?.let { w -> it.put("final_waterline", JSONArray(w.toList())) }
+            r?.optJSONObject("overlay")?.optJSONObject("ellipse")?.let { e -> it.put("final_ellipse", e) }
+            r?.optJSONObject("level")?.let { l -> it.put("final_depth_mm", l.optDouble("depth_mm")) }
         }
-        Toast.makeText(this, "저장했습니다 (${if (v == "correct") "맞음" else "틀림"})", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "저장했습니다 (수정한 최종 결과: ${if (v == "correct") "맞음" else "틀림"})", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 분석 1회 기록: runs.json 추가, 처음 자동 결과 보존, 사람 수정이면 수정 전/후를 edits 에 */
+    private fun record(kind: String, inputs: JSONObject, before: JSONObject?, manual: DoubleArray?, res: JSONObject) {
+        if (!res.optBoolean("ok")) {
+            SessionStore.appendRun(dir, JSONObject().put("kind", kind).put("time_ms", System.currentTimeMillis())
+                .put("inputs", inputs).put("ok", false).put("error", res.optString("error")))
+            return
+        }
+        val idx = SessionStore.appendRun(dir, JSONObject().put("kind", kind).put("time_ms", System.currentTimeMillis())
+            .put("inputs", inputs).put("ok", true).put("result", res))
+        val autoFile = File(dir, "result_auto.json")
+        if (kind == "auto" && !autoFile.exists()) {
+            autoFile.writeText(res.toString(1))
+            autoResult = res
+        }
+        val bOv = before?.optJSONObject("overlay")
+        val aOv = res.optJSONObject("overlay")
+        fun depth(r: JSONObject?) = r?.optJSONObject("level")?.optDouble("depth_mm")
+        when (kind) {
+            "manual_waterline" -> {
+                SessionStore.appendEdit(dir, JSONObject().put("type", "waterline").put("run", idx)
+                    .put("changed", differs(before, res))
+                    .put("before", bOv?.optJSONArray("waterline")).put("after", aOv?.optJSONArray("waterline"))
+                    .put("depth_before_mm", depth(before)).put("depth_after_mm", depth(res)))
+                if (differs(autoResult, res)) SessionStore.writeLabels(dir) { lb ->
+                    // 학습 정답용: 최신 수동 수면선 (자동 결과와 다를 때만)
+                    manual?.let { lb.put("manual_waterline", JSONArray(it.toList())) }
+                    autoWaterlineOf(autoResult)?.let { lb.put("auto_waterline", it) }
+                } else SessionStore.writeLabels(dir) { lb -> lb.remove("manual_waterline") }   // 자동 수면선으로 되돌림
+            }
+            "rim_redetect" -> SessionStore.appendEdit(dir, JSONObject().put("type", "rim_redetect").put("run", idx)
+                .put("changed", differs(before, res))
+                .put("before", bOv?.optJSONObject("ellipse")).put("after", aOv?.optJSONObject("ellipse"))
+                .put("depth_before_mm", depth(before)).put("depth_after_mm", depth(res)))
+        }
+    }
+
+    /** 두 결과의 수면선(0.5 px)·테두리(0.5 px) 가 다르면 true — 사람이 고친 결과인지 판단 */
+    private fun differs(a: JSONObject?, b: JSONObject?): Boolean {
+        if (a == null || b == null) return false
+        val wa = autoWaterlineOf(a); val wb = autoWaterlineOf(b)
+        if (wa != null && wb != null) for (i in 0 until 4) if (abs(wa.getDouble(i) - wb.getDouble(i)) > 0.5) return true
+        val ea = a.optJSONObject("overlay")?.optJSONObject("ellipse")
+        val eb = b.optJSONObject("overlay")?.optJSONObject("ellipse")
+        if (ea != null && eb != null) for (k in listOf("cx", "cy", "a", "b"))
+            if (abs(ea.optDouble(k) - eb.optDouble(k)) > 0.5) return true
+        return false
+    }
+
+    private fun autoWaterlineOf(r: JSONObject?): JSONArray? {
+        val wl = r?.optJSONObject("overlay")?.optJSONArray("waterline") ?: return null
+        return JSONArray(listOf(wl.getJSONArray(0).getDouble(0), wl.getJSONArray(0).getDouble(1),
+            wl.getJSONArray(1).getDouble(0), wl.getJSONArray(1).getDouble(1)))
+    }
+
+    /** v0.3.3 이전 세션: result_auto.json 이 없으면, 사람 수정 흔적이 없을 때만 지금 result.json 을 자동 결과로 보존 */
+    private fun migrateLegacy() {
+        val autoFile = File(dir, "result_auto.json")
+        if (autoFile.exists()) return
+        val cur = SessionStore.readJson(File(dir, "result.json")) ?: return
+        if (!cur.optBoolean("ok")) return
+        val lb = SessionStore.readJson(File(dir, "labels.json"))
+        val touched = lb?.has("manual_waterline") == true || cur.optJSONObject("level")?.optString("rim_source") == "manual_or_previous"
+        if (touched) {
+            // 수정 전 값은 남아 있지 않음 → 그 사실만 기록 (자동 수면선 좌표는 labels.auto_waterline 에 있을 수 있음)
+            if (lb?.has("legacy_auto_result_lost") != true) SessionStore.writeLabels(dir) { it.put("legacy_auto_result_lost", true) }
+            return
+        }
+        autoFile.writeText(cur.toString(1))
+        if (SessionStore.runCount(dir) == 0)
+            SessionStore.appendRun(dir, JSONObject().put("kind", "auto").put("time_ms", autoFile.lastModified())
+                .put("inputs", JSONObject()).put("ok", true).put("result", cur).put("migrated", true))
     }
 
     private fun export() {
