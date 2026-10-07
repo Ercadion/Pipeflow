@@ -20,39 +20,48 @@ pip install -r requirements.txt     # torch, opencv-python-headless, numpy, pill
 
 ## 사용법
 ```bash
-# 사진 1장 → 수위 + 등류 공식 유속 (내경 100 mm, 관 두께 4 mm, 경사 0.5 %)
-python -m pipeflow.cli data/img3.jpg --diameter 100 --wall 4 --slope 0.005 --material glass --out overlay.jpg
+# 사진 1장 → 수위 + 등류 공식 유속 (내경 100 mm, 경사 0.5 %) — 관 두께는 입력하지 않음(내경 테두리 자동 선택)
+python -m pipeflow.cli data/img3.jpg --diameter 100 --slope 0.005 --material glass --out overlay.jpg
 
 # 자동 검출된 수면선이 틀렸을 때: 수면선 위의 두 점을 직접 지정 (이미지 px)
-python -m pipeflow.cli data/img2.jpg --diameter 100 --wall 4 --waterline 60 885 1180 878
+python -m pipeflow.cli data/img2.jpg --diameter 100 --waterline 60 885 1180 878
 
 # 초점거리(px)를 알면 완전투시 보정 (권장)
-python -m pipeflow.cli img.jpg --diameter 100 --wall 4 --f-px 1450
+python -m pipeflow.cli img.jpg --diameter 100 --f-px 1450
 
 # 카메라 캘리브레이션 (체스보드 20~30장, 한 번만) → camera.json
 python -m pipeflow.calibration "calib/*.jpg" --pattern 9 6 --square 25 --out camera.json
 
 # 캘리브레이션 적용 (왜곡 보정 + 완전투시) — 권장
-python -m pipeflow.cli img.jpg --diameter 100 --wall 4 --calib camera.json
+python -m pipeflow.cli img.jpg --diameter 100 --calib camera.json
 
 # 연속 프레임 → H-STIV 표면유속 (카메라 고정, 3초 이상 권장)
-python -m pipeflow.cli frames/f000.png --diameter 100 --wall 4 --calib camera.json --frames frames/*.png --fps 60
+python -m pipeflow.cli frames/f000.png --diameter 100 --calib camera.json --frames frames/*.png --fps 60
 #   --method phase  : 예전 프레임쌍 위상상관 방식, --lines 5 : 폭 방향 측정선 수
 ```
 Python에서 호출:
 ```python
 from pipeflow.pipeline import measure_level, velocity_from_level, velocity_from_frames
-lvl = measure_level("img.jpg", diameter_mm=100, wall_mm=4)        # f_px=... 주면 투시 보정
+lvl = measure_level("img.jpg", diameter_mm=100)                    # f_px=... 주면 투시 보정
 v   = velocity_from_level(lvl, slope=0.005, material="glass")       # v["V"], v["Q"], v["Re"] ...
 
 from pipeflow.calibration import load_calibration
 from pipeflow.pipeline import velocity_from_frames_stiv
 cal = load_calibration("camera.json")
-lvl = measure_level(frames[0], 100, 4, calib=cal)
+lvl = measure_level(frames[0], 100, calib=cal)
 st  = velocity_from_frames_stiv(frames, 1/60, lvl)                  # st["v_surface"], st["lines"], ...
 ```
 
 ## 알고리즘
+
+### 내경 테두리 자동 선택 (`detect.select_inner_rim`) — 관 두께 입력 불필요
+- 끝단 면이 보이면 바깥·안쪽 두 동심 테두리가 생김 → **안쪽(내경)** 을 골라 수위 계산의 기준(= 입력 내경)으로 씀
+- 검출 타원을 장축 0.72~1.38배(단축은 추가로 0.88~1.12배, 단축 방향 중심 이동 포함)로 바꾼 동심 타원들의 둘레 덮임을 한 번에 계산
+  → 안쪽에 또렷한 테두리(덮임 ≥0.55) 있으면 그것, 바깥에 확실한 테두리(≥0.7) 있으면 검출 것이 이미 안쪽, 둘 다 없으면 단일 테두리 = 내경
+- 검출 타원이 두 테두리를 섞어 맞춘 경우(장축은 바깥, 단축은 안쪽)도 보정 후 다시 판정
+- 마지막 재피팅은 두 테두리 사이 간격을 넘지 않는 좁은 띠로, 원 해상도에서
+- 끄기: `--no-inner-select` / `measure_level(..., select_inner=False)` (검출된 테두리를 그대로 내경으로)
+- 검증: `tests/test_inner.py` (두께 4·12 mm, 위에서 30~75°), 결과 `tests/results/inner.txt`
 
 ### 0. 카메라 캘리브레이션 (`calibration.py`) — 이준형 외(2021) 반영
 - 체스보드 Zhang(2000) 방식(OpenCV `calibrateCamera`) → 초점거리·주점·왜곡계수(k1,k2,p1,p2,k3)
@@ -140,7 +149,7 @@ st  = velocity_from_frames_stiv(frames, 1/60, lvl)                  # st["v_surf
 | 수면 추적 유속 | 0.10–0.40 m/s 및 역방향 흐름에서 오차 ≤ 3 % |
 | Manning 수식 | 반관 D=100 mm, S=0.5 %, n=0.010 → 0.605 m/s (손계산과 일치) |
 
-**업로드한 실제 사진 6장** (`examples/`, 내경 100 mm·두께 4 mm로 가정)
+**업로드한 실제 사진 6장** (`examples/`, 내경 100 mm로 가정 — 당시는 두께 4 mm 입력 방식)
 - 테두리 타원: 6/6 정상 검출
 - 수면선 자동 검출: 4/6 정상(img1, 3, 4, 6). img2 는 랩 주름 선을 수면선으로 잘못 잡아서 수동 지정으로 보정해야 함 (`examples/img2_manual.jpg`), img5 는 판단이 애매함
 - f 를 모르고(EXIF 없음) 카메라가 가깝고 20–36° 기울어 있어서, 약투시 오차가 수 mm 정도 있을 수 있음

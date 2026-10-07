@@ -72,7 +72,7 @@ def _expected_roll_deg(gravity):
 
 def analyze(session_dir, params_json="{}", listener=None):
     t0 = time.time()
-    out = dict(ok=False, version="0.3.2")
+    out = dict(ok=False, version="0.3.3")
     try:
         p = json.loads(params_json) if params_json else {}
         with open(os.path.join(session_dir, "meta.json"), encoding="utf-8") as f:

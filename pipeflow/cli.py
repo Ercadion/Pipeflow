@@ -1,6 +1,6 @@
 """명령행 데모
 예)
-  python -m pipeflow.cli data/img3.jpg --diameter 100 --wall 4 --slope 0.005 --material glass
+  python -m pipeflow.cli data/img3.jpg --diameter 100 --slope 0.005 --material glass
   python -m pipeflow.cli f0.jpg --diameter 100 --frames f0.jpg f1.jpg f2.jpg --fps 30 --f-px 1500
 """
 import argparse
@@ -20,8 +20,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="관로 끝단 사진 -> 수위/유속")
     ap.add_argument("image")
     ap.add_argument("--diameter", type=float, required=True, help="관 내경 [mm]")
-    ap.add_argument("--wall", type=float, default=0.0, help="관 두께 [mm] (검출 테두리=외경일 때)")
-    ap.add_argument("--rim-is", choices=["outer", "inner"], default="outer")
+    ap.add_argument("--no-inner-select", action="store_true",
+                    help="내경 테두리 자동 선택 끄기 (검출된 가장 강한 테두리를 그대로 내경으로 사용)")
     ap.add_argument("--waterline", type=float, nargs=4, metavar=("X1", "Y1", "X2", "Y2"),
                     help="수면선 수동 지정 (이미지 px)")
     ap.add_argument("--texture-sign", type=int, default=1, choices=[-1, 0, 1],
@@ -49,7 +49,7 @@ def main(argv=None):
         f_px = f_px_from_exif(a.image)
     calib = load_calibration(a.calib) if a.calib else None
     wl = None if a.waterline is None else [a.waterline[:2], a.waterline[2:]]
-    lvl = measure_level(a.image, a.diameter, a.wall, rim_is=a.rim_is, waterline_pts=wl,
+    lvl = measure_level(a.image, a.diameter, select_inner=not a.no_inner_select, waterline_pts=wl,
                         f_px=f_px, camera_above=not a.camera_below,
                         waterline_kwargs=dict(texture_sign=a.texture_sign), calib=calib)
     out = dict(level=lvl.summary())

@@ -10,10 +10,10 @@ rows = []
 for depth in [15, 30, 50, 70, 85]:
     for cam_h, cam_z, roll in [(20, 250, 0), (60, 180, 5), (100, 150, -8), (60, 400, 10)]:
         sc = Scene(D=100, wall=4, depth=depth, cam_h=cam_h, cam_z=cam_z, roll_deg=roll)
-        el = fit_ellipse(sc.outer_circle_pts())
+        el = fit_ellipse(sc.inner_circle_pts())   # 테두리 타원 = 관 내경
         wl = sc.waterline_pts().numpy()
-        weak = measure_level(sc.render(), 100, 4, ellipse=el, waterline_pts=wl)
-        per = measure_level(sc.render(), 100, 4, ellipse=el, waterline_pts=wl, f_px=sc.f)
+        weak = measure_level(sc.render(), 100, ellipse=el, waterline_pts=wl)
+        per = measure_level(sc.render(), 100, ellipse=el, waterline_pts=wl, f_px=sc.f)
         rows.append((depth, cam_h, cam_z, roll, el.tilt_deg, weak.depth_mm, per.depth_mm))
 print(f"{'h':>4} {'cam_h':>5} {'cam_z':>5} {'roll':>4} {'tilt':>6} {'weak':>7} {'persp':>7}")
 for r in rows:
@@ -26,5 +26,5 @@ print("persp : MAE %.3f mm, max %.3f mm" % (np.abs(ep).mean(), np.abs(ep).max())
 print("\n[auto detection on synthetic renders]")
 for depth in [30, 50, 70]:
     sc = Scene(D=100, wall=4, depth=depth, cam_h=60, cam_z=200, roll_deg=4)
-    r = measure_level(sc.render(), 100, 4, waterline_kwargs=dict(texture_sign=0))
+    r = measure_level(sc.render(), 100, waterline_kwargs=dict(texture_sign=0))
     print(depth, "->", round(r.depth_mm, 2), "tilt", round(r.tilt_deg, 1))

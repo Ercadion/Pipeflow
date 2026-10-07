@@ -64,9 +64,9 @@ for depth, cam_z, cam_x, tag in [(25, 230, 0, '중앙,작게'), (45, 230, 0, '�
                pp=(K_true[0, 2], K_true[1, 2]))
     ideal = sc.render()
     dimg = cv2.remap(ideal, mx, my, cv2.INTER_LINEAR)
-    a = measure_level(dimg, 100, 4, f_px=K_true[0, 0], principal=(K_true[0, 2], K_true[1, 2]),
+    a = measure_level(dimg, 100, f_px=K_true[0, 0], principal=(K_true[0, 2], K_true[1, 2]),
                       waterline_kwargs=dict(texture_sign=0))
-    b = measure_level(dimg, 100, 4, calib=cal, waterline_kwargs=dict(texture_sign=0))
+    b = measure_level(dimg, 100, calib=cal, waterline_kwargs=dict(texture_sign=0))
     print(f"{depth:4d} {tag:>14} | {a.depth_mm:10.2f} | {b.depth_mm:12.2f}")
 
 # 왜곡된 영상에서 STIV 유속: 왜곡 무시 vs 캘리브레이션
@@ -77,10 +77,10 @@ for cam_x, tag in [(0, '관이 화면 중앙'), (60, '관이 화면 가장자리
     sc = Scene(D=100, wall=4, depth=45, cam_h=90, cam_z=150, cam_x=cam_x, roll_deg=3, f=K_true[0, 0], W=W, H=H,
                pp=(K_true[0, 2], K_true[1, 2]), seed=5)
     frames = [cv2.remap(sc.render(t=k / fps, v=300, noise=2, seed=k), mx, my, cv2.INTER_LINEAR) for k in range(120)]
-    la = measure_level(frames[0], 100, 4, f_px=K_true[0, 0], principal=(K_true[0, 2], K_true[1, 2]),
+    la = measure_level(frames[0], 100, f_px=K_true[0, 0], principal=(K_true[0, 2], K_true[1, 2]),
                        waterline_kwargs=dict(texture_sign=0))
     va = velocity_from_frames_stiv(frames, 1 / fps, la)["v_surface"]
-    lb = measure_level(frames[0], 100, 4, calib=cal, waterline_kwargs=dict(texture_sign=0))
+    lb = measure_level(frames[0], 100, calib=cal, waterline_kwargs=dict(texture_sign=0))
     vb = velocity_from_frames_stiv(frames, 1 / fps, lb)["v_surface"]
     print(f"  {tag:<14} 왜곡무시 {va:.4f} ({(va-0.3)/0.3*100:+.2f}%)  캘리브레이션 {vb:.4f} ({(vb-0.3)/0.3*100:+.2f}%)"
           f"   h: {la.depth_mm:.2f} / {lb.depth_mm:.2f}")

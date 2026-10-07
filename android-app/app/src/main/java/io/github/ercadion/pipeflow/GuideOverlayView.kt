@@ -40,6 +40,11 @@ class GuideOverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeS
     var headline: String = "관 끝단을 화면 가운데에 비추세요"
         set(v) { field = v; invalidate() }
     var ready = false
+    /** 터치로 지정한 검사 범위 (뷰 좌표 [x, y, r]) */
+    var roi: FloatArray? = null
+        set(v) { field = v; invalidate() }
+    var zoomText: String = ""
+        set(v) { field = v; invalidate() }
 
     private val dp = resources.displayMetrics.density
     private val pOuter = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2 * dp; color = Color.argb(200, 255, 255, 255) }
@@ -54,6 +59,12 @@ class GuideOverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeS
     private val pBox = Paint().apply { color = Color.argb(140, 0, 0, 0) }
     private val pDot = Paint(Paint.ANTI_ALIAS_FLAG)
     private val pRec = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 45, 45) }
+    private val pRoi = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 2 * dp; color = Color.argb(200, 255, 220, 0)
+        pathEffect = DashPathEffect(floatArrayOf(10 * dp, 8 * dp), 0f)
+    }
+    private val pRoiDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(230, 255, 220, 0) }
+    private val pZoom = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 16 * dp; isFakeBoldText = true }
 
     private fun path(p: FloatArray): Path {
         val path = Path()
@@ -76,6 +87,13 @@ class GuideOverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeS
             if (o != null) c.drawPath(path(o), pOuter)
             c.drawPath(path(inn), pInner)
         }
+        // 검사 범위 (노란 점선 원 + 터치 점)
+        roi?.let { r ->
+            if (state != State.RECORDING) {
+                c.drawCircle(r[0], r[1], r[2], pRoi)
+                c.drawCircle(r[0], r[1], 6 * dp, pRoiDot)
+            }
+        }
         // 중력 수평선 (관 중심 또는 화면 중심 통과)
         val cv = centerView
         val cx = cv?.get(0) ?: (width / 2f)
@@ -97,6 +115,9 @@ class GuideOverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeS
             c.drawCircle(pad + 6 * dp, y - 5 * dp, 6 * dp, pDot)
             c.drawText("${ck.label}  ${ck.detail}", pad + 18 * dp, y, pText)
             y += lineH
+        }
+        if (zoomText.isNotEmpty() && zoomText != "1.0×") {
+            c.drawText(zoomText, width - pZoom.measureText(zoomText) - 12 * dp, boxH + 56 * dp, pZoom)
         }
         if (state == State.RECORDING) {
             c.drawCircle(width - 28 * dp, boxH + 24 * dp, 9 * dp, pRec)

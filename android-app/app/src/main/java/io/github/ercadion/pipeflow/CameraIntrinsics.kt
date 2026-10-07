@@ -13,7 +13,8 @@ import kotlin.math.abs
  *  2순위: 초점거리(mm) / 센서 폭(mm) × 화소 배열 폭
  */
 object CameraIntrinsics {
-    fun compute(ch: CameraCharacteristics, w: Int, h: Int): JSONObject {
+    /** zoom: CameraX 확대 배율 (영상 중심을 잘라 확대 → 초점거리 × zoom, 주점은 중심 기준으로 zoom 배) */
+    fun compute(ch: CameraCharacteristics, w: Int, h: Int, zoom: Double = 1.0): JSONObject {
         val o = JSONObject()
         val active = ch.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)!!
         val pre = ch.get(CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE) ?: active
@@ -50,6 +51,14 @@ object CameraIntrinsics {
             }
         }
         if (fx == null && fFocal != null) { fx = fFocal; source = "focal_length/sensor_size" }
+        val z = if (zoom > 0) zoom else 1.0
+        if (z != 1.0) {
+            fx = fx?.times(z)
+            cx = w / 2.0 + (cx - w / 2.0) * z
+            cy = h / 2.0 + (cy - h / 2.0) * z
+            o.put("zoom_note", "배율 반영: f_px·주점을 zoom 배 (광학 렌즈 전환 기기는 근사)")
+        }
+        o.put("zoom_ratio", z)
         if (fx != null) o.put("f_px", fx)
         o.put("cx", cx); o.put("cy", cy); o.put("source", source)
         o.put("width", w); o.put("height", h)

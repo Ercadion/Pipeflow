@@ -59,6 +59,10 @@ public final class LiveRimTracker {
     public Ellipse current() { return cur; }
     public Result last() { return last; }
     public boolean locked() { return cur != null; }
+    /** 검사 범위 지정(입력 영상 좌표). 지정·해제 시 추적을 처음부터 다시 */
+    public void setRoi(double x, double y, double r) { detector.setRoi(x, y, r); reset(); }
+    public void clearRoi() { detector.clearRoi(); reset(); }
+
     public void reset() { curCov = 0; cur = null; cand = null; candHits = 0; miss = 0; }
 
     static boolean similar(Ellipse p, Ellipse q) {

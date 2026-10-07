@@ -64,6 +64,37 @@ public final class LiveRimDetector {
 
     private final Random rng = new Random(1);
 
+    // 사용자 지정 검사 범위 (화면 터치) — 입력 영상 좌표
+    private boolean roiOn;
+    private double roiX, roiY, roiR;
+
+    /** 터치한 점(x,y)과 반경 r 의 원을 주 검사 범위로: 이 안의 엣지로 후보를 만들고, 터치 점을 품는 타원만 인정 */
+    public void setRoi(double x, double y, double r) { roiOn = true; roiX = x; roiY = y; roiR = r; }
+    public void clearRoi() { roiOn = false; }
+    public boolean hasRoi() { return roiOn; }
+
+    /** 터치 점이 타원(1.25배) 안에 있는지 */
+    private boolean roiOk(Ellipse e) {
+        if (!roiOn) return true;
+        double c = Math.cos(e.phi), s = Math.sin(e.phi);
+        double dx = roiX - e.cx, dy = roiY - e.cy;
+        double u = (c * dx + s * dy) / e.a, v = (-s * dx + c * dy) / e.b;
+        return u * u + v * v <= 1.25 * 1.25;
+    }
+
+    /** 조각에 검사 범위 안 점이 있는지 */
+    private boolean segInRoi(int seg) {
+        if (!roiOn) return true;
+        int st = segStart.get(seg), len = segLen.get(seg);
+        int step = Math.max(1, len / 12);
+        double r2 = roiR * roiR;
+        for (int i = 0; i < len; i += step) {
+            double dx = ex[st + i] - roiX, dy = ey[st + i] - roiY;
+            if (dx * dx + dy * dy <= r2) return true;
+        }
+        return false;
+    }
+
     // 작업 버퍼 (재사용)
     private int bw, bh;
     private float[] blur, gx, gy, mag;
@@ -91,7 +122,7 @@ public final class LiveRimDetector {
         // 1) 추적
         if (prior != null) {
             Cand c = fitNear(prior, w, h, scoreIdx);
-            if (c != null && c.cov >= 0.5) { best = c; r.tracked = true; }
+            if (c != null && c.cov >= 0.5 && roiOk(c.e)) { best = c; r.tracked = true; }
         }
         // 2) 전역 탐색 (추적 실패 시 + 주기적으로)
         calls++;
@@ -108,7 +139,7 @@ public final class LiveRimDetector {
             Cand ref = refine(best.e, w, h, scoreIdx);
             if (ref != null && ref.cov >= best.cov * 0.95) best = ref;
             r.distinct = best.cov - clutterCov(best.e, w, h, scoreIdx);
-            r.found = best.cov >= foundCov && r.distinct >= minDistinct;
+            r.found = best.cov >= foundCov && r.distinct >= minDistinct && roiOk(best.e);
             r.ellipse = best.e;
             r.coverage = best.cov;
             interiorStats(best.e, w, h, r);
@@ -239,9 +270,11 @@ public final class LiveRimDetector {
 
     private Cand globalSearch(int w, int h, int[] scoreIdx) {
         // 긴 조각 상위 40개
-        int ns = segLen.size();
-        Integer[] order = new Integer[ns];
-        for (int i = 0; i < ns; i++) order[i] = i;
+        // (검사 범위가 있으면 그 안에 걸친 조각만)
+        int nAll = segLen.size(), ns = 0;
+        Integer[] order = new Integer[nAll];
+        for (int i = 0; i < nAll; i++) if (segInRoi(i)) order[ns++] = i;
+        order = Arrays.copyOf(order, ns);
         Arrays.sort(order, (p, q) -> segLen.get(q) - segLen.get(p));
         int top = 0;
         while (top < ns && top < 40 && segLen.get(order[top]) >= 15) top++;
@@ -271,6 +304,8 @@ public final class LiveRimDetector {
             Cand c2 = fitNear(seed, w, h, scoreIdx);
             if (c2 != null) cands.add(c2);
         }
+        if (roiOn) cands.removeIf(c -> !roiOk(c.e));
+        if (DEBUG) System.out.println("cands after roi: " + cands.size() + " segs " + ns);
         if (cands.isEmpty()) return null;
         cands.sort((p, q) -> Integer.compare(q.occ, p.occ));
         // 상위 후보는 '주변 잡음 대비 선명도'로 다시 정렬: 키보드·글자처럼 엣지가 빽빽한 곳은
@@ -338,6 +373,10 @@ public final class LiveRimDetector {
             long mk = 0;
             for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) mk |= mask[(y + dy) * gw + x + dx];
             dirs[y * gw + x] = Long.bitCount(mk);
+            if (roiOn) {   // 중심이 검사 범위 밖이면 제외
+                double ddx = (x + 0.5) * CELL - roiX, ddy = (y + 0.5) * CELL - roiY;
+                if (ddx * ddx + ddy * ddy > roiR * roiR) dirs[y * gw + x] = 0;
+            }
         }
         // 상위 봉우리 3개 (서로 떨어진)
         int[] peaks = new int[3]; int np = 0;

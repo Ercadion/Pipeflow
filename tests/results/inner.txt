@@ -1,0 +1,18 @@
+  두께   각도   참h |     완전투시     약투시 | 내경 선택
+   4   30   25 |    24.78   21.35 | inner_ring / inner_ring
+   4   30   75 |    74.88   71.06 | inner_ring / inner_ring
+   4   45   25 |    24.59   19.87 | inner_ring / inner_ring
+   4   45   75 |    74.82   69.32 | inner_ring / inner_ring
+   4   60   25 |    24.60   18.91 | inner_ring / inner_ring
+   4   60   75 |    74.72   67.86 | inner_ring / inner_ring
+   4   75   25 |    23.45   17.37 | inner_ring / inner_ring
+   4   75   75 |    74.39   66.59 | inner_ring / inner_ring
+  12   30   25 |    24.78   21.35 | inner_ring / inner_ring
+  12   30   75 |    74.88   71.06 | inner_ring / inner_ring
+  12   45   25 |    24.59   19.87 | inner_ring / inner_ring
+  12   45   75 |    74.82   69.32 | inner_ring / inner_ring
+  12   60   25 |    24.60   18.91 | inner_ring / inner_ring
+  12   60   75 |    74.72   67.86 | inner_ring / inner_ring
+  12   75   25 |    24.27   18.04 | inner_ring / inner_ring
+  12   75   75 |    74.57   66.81 | inner_ring / inner_ring
+완전투시 최대 오차 1.55 mm

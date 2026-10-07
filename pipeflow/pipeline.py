@@ -21,7 +21,7 @@ import torch
 import torch.nn.functional as F
 
 from . import hydraulics as hyd
-from .detect import detect_rim, detect_waterline, load_image, rectify_image
+from .detect import detect_rim, detect_waterline, load_image, rectify_image, select_inner_rim
 from .geometry import (DTYPE, Ellipse, backproject_to_plane, circle_pose, fit_ellipse,
                        intrinsics, project, rectify_affine)
 
@@ -55,6 +55,9 @@ class LevelResult:
             d["waterline_confidence"] = round(self.confidence, 3)
         if self.depth_mm_weak is not None and self.method == "perspective":
             d["depth_mm_weak_perspective"] = round(self.depth_mm_weak, 2)
+        src = (self.extra.get("det_info") or {}).get("inner_source")
+        if src:
+            d["inner_source"] = src
         return d
 
 
@@ -71,9 +74,9 @@ def _rect_line_to_img(theta, rho, R_rect, Ainv, tinv, inner=1.0):
     return (q @ Ainv.T + tinv).numpy()
 
 
-def measure_level(img, diameter_mm: float, wall_mm: float = 0.0, *,
-                  rim_is: str = "outer",
+def measure_level(img, diameter_mm: float, *,
                   ellipse: Ellipse | None = None,
+                  select_inner: bool = True,
                   waterline_pts=None,
                   f_px: float | None = None, principal=None,
                   camera_above: bool = True,
@@ -82,8 +85,8 @@ def measure_level(img, diameter_mm: float, wall_mm: float = 0.0, *,
     """사진 1장으로 수심 계산.
 
     diameter_mm  : 관 내경 [mm] (수리 계산 기준)
-    wall_mm      : 관 두께 [mm]. rim_is='outer' 이면 검출 테두리 = 외경(D+2t) 으로 스케일 결정
-    ellipse      : 끝단 타원을 직접 지정(수동 보정) - 없으면 자동 검출
+    ellipse      : 관 내경 테두리 타원을 직접 지정(수동 보정) - 없으면 자동 검출
+    select_inner : 자동 검출 시 끝단 면의 바깥/안쪽 동심 테두리 중 안쪽(내경)을 골라 씀 (관 두께 입력 불필요)
     waterline_pts: 수면선 위 두 점 [(x1,y1),(x2,y2)] (이미지 px) - 없으면 자동 검출
     f_px         : 초점거리 [px]. 주면 완전투시 보정 수행 (principal 기본 = 이미지 중심)
     calib        : calibration.calibrate_chessboard 결과. 주면 렌즈 왜곡 보정 후
@@ -100,10 +103,13 @@ def measure_level(img, diameter_mm: float, wall_mm: float = 0.0, *,
         f_px, principal = intrinsics_for(calib, img.shape)
     H, W = img.shape[:2]
     r_in = diameter_mm / 2
-    R_rim = r_in + wall_mm if rim_is == "outer" else r_in
+    R_rim = r_in                     # 테두리 타원 = 관 내경
     det_info = {}
     if ellipse is None:
         ellipse, det_info = detect_rim(img)
+        if select_inner:
+            ellipse, iinfo = select_inner_rim(img, ellipse, f_px=f_px, principal=principal)
+            det_info.update(iinfo)
 
     rect, R_rect, (Ainv, tinv) = rectify_image(img, ellipse, RECT_SIZE)
     A = torch.linalg.inv(Ainv)

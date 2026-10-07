@@ -12,7 +12,7 @@ for v_true, static in [(0.02, 0), (0.05, 0), (0.15, 0), (0.4, 0), (0.8, 0),
                        (0.02, 25), (0.05, 25), (0.15, 25), (0.4, 25), (-0.2, 25)]:
     sc = Scene(D=100, wall=4, depth=45, cam_h=90, cam_z=170, roll_deg=3, seed=3)
     frames = [sc.render(t=k / fps, v=v_true * 1000, static=static, noise=3.0, seed=k) for k in range(n)]
-    lvl = measure_level(frames[0], 100, 4, f_px=sc.f, waterline_kwargs=dict(texture_sign=0))
+    lvl = measure_level(frames[0], 100, f_px=sc.f, waterline_kwargs=dict(texture_sign=0))
     try:
         a = velocity_from_frames(frames, 1 / fps, lvl)["v_surface"]
     except Exception as e:

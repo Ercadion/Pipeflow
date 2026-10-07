@@ -10,7 +10,7 @@ fps = 60.0
 for v_true, cam_h, depth in [(100, 80, 40), (250, 80, 40), (250, 120, 60), (400, 60, 30), (-150, 100, 50)]:
     sc = Scene(D=100, wall=4, depth=depth, cam_h=cam_h, cam_z=160, roll_deg=3, seed=1)
     frames = [sc.render(t=k / fps, v=v_true) for k in range(6)]
-    lvl = measure_level(frames[0], 100, 4, f_px=sc.f, waterline_kwargs=dict(texture_sign=0))
+    lvl = measure_level(frames[0], 100, f_px=sc.f, waterline_kwargs=dict(texture_sign=0))
     res = velocity_from_frames(frames, 1 / fps, lvl, res_mm=0.5)
     print(f"v_true={v_true/1000:+.3f} m/s  h_true={depth}  h_est={lvl.depth_mm:6.2f}  "
           f"v_surf_est={res['v_surface']:+.4f} m/s  graze={res['graze_deg']:.1f}°  warn={res['warnings']}")

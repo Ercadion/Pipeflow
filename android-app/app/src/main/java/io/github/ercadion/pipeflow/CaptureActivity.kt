@@ -16,6 +16,9 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Range
 import android.util.Size
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
@@ -27,6 +30,7 @@ import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -60,6 +64,8 @@ import kotlin.math.sqrt
  *  - 미리보기 중: 저해상도(긴 변 ~320px)로 초당 ~8회 관 테두리 실시간 검출(LiveRimDetector)
  *    → 바깥 테두리(흰색) + 관 내경(빨강) 타원을 화면에 표시, 촬영 준비 체크리스트 갱신
  *  - 조명 버튼: 후면 플래시(토치) 켜기/끄기 (촬영 중에도 유지)
+ *  - 두 손가락: 확대/축소 (두 번 탭: 1×), 탭: 그 위치에 초점·노출 + 그 주변을 관 검사 범위로 지정, 길게 누름: 검사 범위 해제
+ *    (확대 배율은 meta.json 의 zoom_ratio 와 초점거리(f_px)에 반영)
  *  - 촬영: Y 평면 저장(still.y 원 해상도 + frames.y 2×2 축소) + 타임스탬프 + 중력 + 포착한 타원(live_ellipse)
  */
 @androidx.annotation.OptIn(markerClass = [ExperimentalCamera2Interop::class])
@@ -75,6 +81,18 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
     private var provider: ProcessCameraProvider? = null
     private var fpsRange: Range<Int>? = null
     private var torchOn = false
+
+    // 확대/축소, 터치 초점·검사 범위
+    private lateinit var scaleDetector: ScaleGestureDetector
+    private lateinit var gestureDetector: GestureDetector
+    private var zoomReq = 1f
+    /** 검사 범위 (분석 영상 = 센서 방향 원 해상도 좌표) [x, y, r], null = 없음 */
+    @Volatile private var roi: DoubleArray? = null
+    @Volatile private var roiVersion = 0
+    private var roiApplied = -1
+    // 화면 ↔ 영상 좌표 변환용 (updateOverlay 에서 갱신, UI 스레드)
+    private var mapW = 0; private var mapH = 0; private var mapRot = 0
+    private var mapSc = 1.0; private var mapOx = 0.0; private var mapOy = 0.0
 
     // 녹화 상태 (analyzer 스레드에서 사용)
     @Volatile private var recording = false
@@ -102,6 +120,8 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
     private var lastSharpness = 0.0
     private var lastDetectMs = 0.0
     private var liveEllipseAtStart: LiveRimDetector.Ellipse? = null
+    private var zoomAtStart = 1f
+    private var roiAtStart: DoubleArray? = null
     private var liveCoverageAtStart = 0.0
 
     // 센서
@@ -128,6 +148,7 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         btnRecord.setOnClickListener { startRecording() }
         btnTorch.setOnClickListener { setTorch(!torchOn) }
+        setupGestures()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
             startCamera() else permLauncher.launch(Manifest.permission.CAMERA)
     }
@@ -215,6 +236,8 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
                 prov.unbindAll()
                 val cam = prov.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
                 camera = cam
+                zoomReq = cam.cameraInfo.zoomState.value?.zoomRatio ?: 1f
+                guide.zoomText = String.format(Locale.US, "%.1f×", zoomReq)
                 val hasFlash = cam.cameraInfo.hasFlashUnit()
                 btnTorch.visibility = if (hasFlash) View.VISIBLE else View.GONE
                 if (torchOn && hasFlash) cam.cameraControl.enableTorch(true)
@@ -232,6 +255,86 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         btnTorch.text = if (on) "조명 끄기" else "조명 켜기"
     }
 
+    // ------------------------------------------------------------------ 확대/축소 · 터치 초점 · 검사 범위
+    private fun setupGestures() {
+        scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(d: ScaleGestureDetector): Boolean {
+                setZoom(zoomReq * d.scaleFactor)
+                return true
+            }
+        })
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean { tapFocus(e.x, e.y); return true }
+            override fun onDoubleTap(e: MotionEvent): Boolean { setZoom(1f); return true }
+            override fun onLongPress(e: MotionEvent) { clearRoi(true) }
+        })
+        guide.setOnTouchListener { v, ev ->
+            if (recording) return@setOnTouchListener true      // 촬영 중에는 배율·초점 고정
+            scaleDetector.onTouchEvent(ev)
+            if (!scaleDetector.isInProgress) gestureDetector.onTouchEvent(ev)
+            if (ev.actionMasked == MotionEvent.ACTION_UP) v.performClick()
+            true
+        }
+    }
+
+    private fun setZoom(z: Float) {
+        val cam = camera ?: return
+        val zs = cam.cameraInfo.zoomState.value ?: return
+        val nz = z.coerceIn(zs.minZoomRatio, zs.maxZoomRatio)
+        if (abs(nz - zoomReq) < 1e-3) return
+        val k = nz / zoomReq
+        zoomReq = nz
+        cam.cameraControl.setZoomRatio(nz)
+        guide.zoomText = String.format(Locale.US, "%.1f×", nz)
+        // 검사 범위를 영상 중심 기준으로 같은 배율만큼 옮김
+        val r = roi
+        if (r != null && mapW > 0) {
+            val cx = mapW / 2.0; val cy = mapH / 2.0
+            val nr = doubleArrayOf(cx + (r[0] - cx) * k, cy + (r[1] - cy) * k, min(r[2] * k, 0.6 * min(mapW, mapH)))
+            if (nr[0] in 0.0..mapW.toDouble() && nr[1] in 0.0..mapH.toDouble()) setRoi(nr) else clearRoi(false)
+        } else {
+            roiVersion += 1   // 배율이 바뀌면 추적도 새로
+        }
+    }
+
+    /** 탭: 그 위치에 초점·노출 맞춤 + 주변(짧은 변의 45%)을 관 검사 범위로 */
+    private fun tapFocus(vx: Float, vy: Float) {
+        val cam = camera ?: return
+        val pt = previewView.meteringPointFactory.createPoint(vx, vy)
+        val action = FocusMeteringAction.Builder(pt, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+            .disableAutoCancel().build()
+        cam.cameraControl.startFocusAndMetering(action)
+        val p = viewToSensor(vx.toDouble(), vy.toDouble()) ?: return
+        setRoi(doubleArrayOf(p[0], p[1], 0.45 * min(mapW, mapH)))
+        Toast.makeText(this, "초점 맞춤 · 터치한 주변에서 관을 찾습니다 (길게 누르면 해제)", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun setRoi(r: DoubleArray) { roi = r; roiVersion++ }
+
+    private fun clearRoi(cancelFocus: Boolean) {
+        if (roi == null && !cancelFocus) return
+        roi = null; roiVersion++
+        guide.roi = null
+        if (cancelFocus) {
+            camera?.cameraControl?.cancelFocusAndMetering()
+            Toast.makeText(this, "검사 범위 해제 · 자동 초점", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 화면(PreviewView) 좌표 → 분석 영상(센서 방향) 좌표 */
+    private fun viewToSensor(vx: Double, vy: Double): DoubleArray? {
+        if (mapW == 0) return null
+        val ux = (vx - mapOx) / mapSc; val uy = (vy - mapOy) / mapSc
+        val w = mapW; val h = mapH
+        return when ((mapRot / 90) % 4) {
+            1 -> doubleArrayOf(uy, h - 1 - ux)
+            2 -> doubleArrayOf(w - 1 - ux, h - 1 - uy)
+            3 -> doubleArrayOf(w - 1 - uy, ux)
+            else -> doubleArrayOf(ux, uy)
+        }
+    }
+
     // ------------------------------------------------------------------ 녹화
     private fun startRecording() {
         if (recording) return
@@ -242,6 +345,8 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         for (i in 0..2) gravSum[i] = 0.0
         gravN = 0; startNs = 0L
         liveEllipseAtStart = if (locked) smooth else null
+        zoomAtStart = camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: zoomReq
+        roiAtStart = roi
         liveCoverageAtStart = lastCoverage
         recording = true
         guide.state = GuideOverlayView.State.RECORDING
@@ -337,6 +442,12 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
                 smallBuf[y * sw + x] = (s / area).toByte()
             }
         }
+        val ver = roiVersion
+        if (ver != roiApplied) {          // 검사 범위 변경(또는 배율 변경) → 추적 새로
+            roiApplied = ver
+            val rr = roi
+            if (rr != null) tracker.setRoi(rr[0] / f, rr[1] / f, rr[2] / f) else tracker.clearRoi()
+        }
         val r = tracker.update(smallBuf, sw, sh)
         lastDetectMs = r.millis
         if (r.found) { lastCoverage = r.coverage; lastBrightness = r.brightness; lastSharpness = r.sharpness; lastInnerSource = r.innerSource }
@@ -371,14 +482,20 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         val vw = previewView.width.toDouble(); val vh = previewView.height.toDouble()
         val sc = max(vw / uw, vh / uh)
         val ox = (vw - uw * sc) / 2; val oy = (vh - uh * sc) / 2
+        mapW = w; mapH = h; mapRot = rot; mapSc = sc; mapOx = ox; mapOy = oy
+        guide.roi = roi?.let { r ->
+            val u = toUpright(r[0], r[1], w, h, rot)
+            floatArrayOf((u[0] * sc + ox).toFloat(), (u[1] * sc + oy).toFloat(), (r[2] * sc).toFloat())
+        }
         val checks = ArrayList<GuideOverlayView.Check>()
         var ready: Boolean
 
         if (e == null || !locked) {
             guide.state = GuideOverlayView.State.SEARCHING
             guide.outer = null; guide.inner = null; guide.centerView = null
-            guide.headline = "관 테두리를 찾는 중…"
-            checks += GuideOverlayView.Check("관 포착", 2, "관 끝단을 화면 가운데에 비추세요")
+            guide.headline = if (roi != null) "터치한 범위에서 관 테두리를 찾는 중…" else "관 테두리를 찾는 중…"
+            checks += GuideOverlayView.Check("관 포착", 2,
+                if (roi != null) "못 찾으면 관 위치를 다시 탭" else "관 끝단을 비추거나 관 위치를 탭하세요")
             ready = false
         } else {
             // e = 관 내경 테두리 (검출기가 끝단 면의 안쪽 동심 테두리를 골라 줌 → 관 두께 입력 불필요)
@@ -427,8 +544,9 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         guide.ready = ready
         btnRecord.text = if (ready) "촬영 (준비 완료)" else "촬영 (준비 안 됨)"
         btnRecord.setBackgroundColor(if (ready) Color.rgb(46, 160, 67) else Color.rgb(120, 120, 120))
-        txtStatus.text = String.format(Locale.US, "분석 %d×%d · %.0f fps (목표 %s) · 검출 %.0f ms · 촬영 %.0f초",
-            w, h, fpsEstimate, fpsRange?.toString() ?: "기본", lastDetectMs, settings.durationSec)
+        txtStatus.text = String.format(Locale.US, "배율 %.1f× · 분석 %d×%d · %.0f fps (목표 %s) · 검출 %.0f ms · 촬영 %.0f초\n" +
+            "두 손가락: 확대/축소 · 탭: 초점+검사 범위 · 길게: 해제 · 두 번 탭: 1×",
+            zoomReq, w, h, fpsEstimate, fpsRange?.toString() ?: "기본", lastDetectMs, settings.durationSec)
     }
 
     // ------------------------------------------------------------------ 저장
@@ -446,6 +564,8 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
             .put("fps", fpsEstimate).put("binning", 2))
         meta.put("fps_range", fpsRange?.toString())
         meta.put("torch", torchOn)
+        meta.put("zoom_ratio", zoomAtStart.toDouble())
+        roiAtStart?.let { meta.put("touch_roi", JSONArray(it.toList())) }
         if (gravN > 0) meta.put("gravity", JSONArray(gravSum.map { it / gravN }))
         meta.put("params", settings.toParams())
         // 실시간으로 포착한 테두리 → 회전 보정된 still 좌표로 저장 (분석 시 정밀화의 시작값)
@@ -463,7 +583,7 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
                 val info = Camera2CameraInfo.from(cam.cameraInfo)
                 (getSystemService(Context.CAMERA_SERVICE) as CameraManager).getCameraCharacteristics(info.cameraId)
             } else backCameraCharacteristics()
-            if (ch != null) meta.put("intrinsics", CameraIntrinsics.compute(ch, stillW, stillH))
+            if (ch != null) meta.put("intrinsics", CameraIntrinsics.compute(ch, stillW, stillH, zoomAtStart.toDouble()))
         } catch (e: Exception) {
             meta.put("intrinsics_error", e.toString())
         }
