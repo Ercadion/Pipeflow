@@ -15,10 +15,11 @@ android {
         // 앱 버전 → android-app/version.properties 의 versionName (직접 수정). 코드에서는 BuildConfig.VERSION_NAME
         //   측정 폴더 이름·meta.json·결과에 자동 기록
         // versionCode(설치 시 새 버전 판단용 정수)는 자동: GitHub Actions 실행 번호 + 100 (PC 빌드는 50)
-        val verProps = java.util.Properties().apply {
-            rootProject.file("version.properties").takeIf { it.exists() }?.reader(Charsets.UTF_8)?.use { load(it) }
-        }
-        versionName = verProps.getProperty("versionName", "0.0.0").trim()
+        // (android { } 안에서는 'java' 가 다른 것을 가리켜 java.util.Properties 를 못 씀 → 줄 단위로 직접 읽음)
+        versionName = rootProject.file("version.properties").takeIf { it.exists() }
+            ?.readLines(Charsets.UTF_8)?.map { it.trim() }
+            ?.firstOrNull { it.startsWith("versionName=") }
+            ?.substringAfter("=")?.trim()?.takeIf { it.isNotEmpty() } ?: "0.0.0"
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(100) ?: 50
         // 빌드한 커밋: GitHub Actions 는 GITHUB_SHA 환경변수 제공, PC 빌드는 "local"
         buildConfigField("String", "GIT_SHA", "\"${(System.getenv("GITHUB_SHA") ?: "local").take(7)}\"")
