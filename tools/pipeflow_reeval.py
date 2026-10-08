@@ -3,11 +3,13 @@
 
 흐름
   1) 최근 N개 측정을 시험할 엔진으로 '순수 자동' 재분석 (사람이 고친 수면선·테두리는 쓰지 않음)
-     → 측정 폴더에 eval_<버전>.json 저장 (result.json·result_auto.json 은 건드리지 않음)
+     → 측정 폴더에 eval_<버전>.json 저장 (앱이 저장한 결과 파일은 건드리지 않음)
   2) version_report(): 같은 측정의 기준 결과와 비교
      - 기준: baseline 을 주면 eval_<baseline>.json, 아니면 다른 버전의 eval_*.json 중 가장 최근 것,
-       그것도 없으면 result_auto.json(촬영 당시 앱의 자동 결과)
-     - 참값: labels.truth_* (실측 입력) > 사람이 고친 수면선으로 계산한 최종 결과 > '처음 자동 결과 맞음' 표시된 자동 결과
+       그것도 없으면 촬영 당시 앱의 자동 결과 (result.json, 예전 형식은 result_auto.json)
+     - 참값: 실측값 입력(annotations.json, 예전 labels.json) > 저장 전 확인에서 사람이 고친 결과(result_corrected.json)
+             > (예전 형식) '처음 자동 결과 맞음' 표시된 자동 결과
+       고치지 않고 저장한 자동 결과는 참값으로 쓰지 않음 (기준 엔진에 유리해지므로)
      - 참값이 있으면 오차가 줄었는지(개선/악화), 없으면 결과가 바뀌었는지만 표시
 """
 from __future__ import annotations
@@ -16,6 +18,10 @@ import glob
 import json
 import os
 import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from session_record import read_session     # noqa: E402
 
 DEPTH_TOL_MM = 0.5      # 이보다 작은 오차 변화는 '같음'
 CHANGE_DEPTH_MM = 1.0   # 참값 없을 때 '바뀜' 기준
@@ -103,14 +109,9 @@ def _prev_result(d, version, meta, baseline=None):
         evs.sort(key=lambda t: t[0])
         r = evs[-1][1]
         return r, str(r.get("version", "?")), "eval"
-    r = _load(os.path.join(d, "result_auto.json"))
+    r = read_session(d)["auto"]
     if r is not None:
-        return r, str(r.get("version") or meta.get("app_version", "?")), "result_auto"
-    lab = _load(os.path.join(d, "labels.json")) or {}
-    r = _load(os.path.join(d, "result.json"))
-    if r is not None and not lab.get("manual_waterline") and not lab.get("edits") \
-            and (r.get("level") or {}).get("rim_source") != "manual_or_previous":
-        return r, str(r.get("version") or meta.get("app_version", "?")), "result_legacy"
+        return r, str(r.get("version") or meta.get("app_version", "?")), "app_auto"
     return None, None, None
 
 
@@ -122,19 +123,20 @@ def _num(x):
         return None
 
 
-def _truth(d, lab):
-    """참값: (수심, 출처), 평균유속, 유량"""
-    t_depth, src = _num(lab.get("truth_depth_mm")), "measured"
-    if t_depth is None and lab.get("manual_waterline") and lab.get("final_feedback") != "wrong":
-        fin = _summary(_load(os.path.join(d, "result.json")))
+def _truth(S):
+    """참값: (수심, 출처), 평균유속, 유량 — S = read_session()"""
+    ann, lab = S["ann"], S["labels"]
+    t_depth, src = _num(ann.get("truth_depth_mm")), "measured"
+    if t_depth is None and S["corrected"] is not None and lab.get("final_feedback") != "wrong":
+        fin = _summary(S["corrected"])
         if fin and fin["depth"] is not None:
             t_depth, src = fin["depth"], "corrected"
     if t_depth is None and lab.get("auto_feedback") == "correct":
-        a = _summary(_load(os.path.join(d, "result_auto.json")))
+        a = _summary(S["auto"])
         if a and a["depth"] is not None:
             t_depth, src = a["depth"], "auto_confirmed"
     return (t_depth, src if t_depth is not None else None,
-            _num(lab.get("truth_v_mean_mps")), _num(lab.get("truth_Q_Lps")))
+            _num(ann.get("truth_v_mean_mps")), _num(ann.get("truth_Q_Lps")))
 
 
 def _abs(a, b):
@@ -152,7 +154,6 @@ def version_report(root: str, version: str, names=None, recent: int = 20, baseli
     for name in names:
         d = os.path.join(root, name)
         meta = _load(os.path.join(d, "meta.json")) or {}
-        lab = _load(os.path.join(d, "labels.json")) or {}
         new_r = _load(os.path.join(d, eval_name(version)))
         row = dict(session=session_id(name), path=name, captured_version=meta.get("app_version"),
                    captured_build=meta.get("app_build"))
@@ -163,7 +164,7 @@ def version_report(root: str, version: str, names=None, recent: int = 20, baseli
         new = _summary(new_r)
         prev_r, prev_ver, prev_src = _prev_result(d, version, meta, baseline)
         prev = _summary(prev_r)
-        t_depth, t_src, t_v, t_q = _truth(d, lab)
+        t_depth, t_src, t_v, t_q = _truth(read_session(d))
         row.update(prev_version=prev_ver, prev_source=prev_src, truth_source=t_src, truth_depth_mm=t_depth,
                    truth_v_mean_mps=t_v, truth_Q_Lps=t_q,
                    new_ok=new is not None, prev_ok=prev is not None,

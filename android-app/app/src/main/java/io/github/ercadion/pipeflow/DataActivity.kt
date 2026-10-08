@@ -21,7 +21,7 @@ import java.util.concurrent.Executors
 
 /**
  * 측정 데이터 관리 (메뉴 → 측정 데이터)
- *  - 앱 저장소의 측정 목록: 날짜·시각, 앱 버전(폴더 이름 끝 _v…), 수심·유속, 수정/실측값/피드백 여부, 크기
+ *  - 앱 저장소의 측정 목록: 날짜·시각, 앱 버전(폴더 이름 끝 _v…), 수심·유속, 저장 전/수정됨/실측값 여부, 크기
  *  - 체크해서 선택 → 선택한 측정을 zip 하나로 내보내기(공유) 또는 삭제
  *  - 항목 누르기 → 결과 화면
  */
@@ -61,6 +61,7 @@ class DataActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_data)
         title = "측정 데이터"
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)      // 왼쪽 위 ← 뒤로가기
         list = findViewById(R.id.list)
         txtSummary = findViewById(R.id.txtSummary)
         btnAll = findViewById(R.id.btnAll)
@@ -86,6 +87,8 @@ class DataActivity : AppCompatActivity() {
         if (!busy) load()
     }
 
+    override fun onSupportNavigateUp(): Boolean { finish(); return true }
+
     override fun onDestroy() {
         super.onDestroy()
         worker.shutdown()
@@ -103,18 +106,25 @@ class DataActivity : AppCompatActivity() {
         val date = if (n.length >= 15) "${n.substring(0, 4)}-${n.substring(4, 6)}-${n.substring(6, 8)} " +
             "${n.substring(9, 11)}:${n.substring(11, 13)}:${n.substring(13, 15)}" else n
         val ver = SessionStore.versionOf(dir)
-        val r = SessionStore.readJson(File(dir, "result.json"))
-        val lb = SessionStore.readJson(File(dir, "labels.json"))
+        val auto = SessionStore.autoResult(dir)
+        val corr = SessionStore.correctedResult(dir)
+        val ann = SessionStore.annotations(dir)
+        val r = corr ?: auto
         val parts = mutableListOf<String>()
         val lv = r?.optJSONObject("level")
         val st = r?.optJSONObject("velocity_stiv")
         if (r == null) parts += "미분석" else if (!r.optBoolean("ok")) parts += "분석 실패"
-        lv?.let { parts += String.format(Locale.US, "수심 %.1f mm", it.optDouble("depth_mm")) }
+        lv?.let {
+            val ad = auto?.optJSONObject("level")?.optDouble("depth_mm")
+            parts += if (corr != null && ad != null)
+                String.format(Locale.US, "수심 %.1f mm (자동 %.1f)", it.optDouble("depth_mm"), ad)
+            else String.format(Locale.US, "수심 %.1f mm", it.optDouble("depth_mm"))
+        }
         st?.let { parts += String.format(Locale.US, "표면유속 %.3f m/s", it.optDouble("v_surface_mps")) }
         val flags = mutableListOf<String>()
-        if (lb?.has("manual_waterline") == true || (lb?.optJSONArray("edits")?.length() ?: 0) > 0) flags += "수정함"
-        if (lb?.has("truth_depth_mm") == true || lb?.has("truth_v_mean_mps") == true || lb?.has("truth_Q_Lps") == true) flags += "실측값"
-        lb?.optString("auto_feedback")?.takeIf { it.isNotEmpty() }?.let { flags += if (it == "correct") "자동 맞음" else "자동 틀림" }
+        if (SessionStore.isPending(dir)) flags += "저장 전"
+        if (corr != null) flags += "수정됨"
+        if (listOf("truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps").any { ann.has(it) }) flags += "실측값"
         val bytes = SessionStore.sizeOf(dir)
         val detail = (parts + flags).joinToString(" · ") + String.format(Locale.US, " · %.1f MB", bytes / 1e6)
         return Item(dir, date + (ver?.let { "  (v$it)" } ?: ""), detail, bytes)
@@ -169,7 +179,7 @@ class DataActivity : AppCompatActivity() {
         if (sel.isEmpty()) return
         AlertDialog.Builder(this)
             .setTitle("측정 ${sel.size}건 삭제")
-            .setMessage("선택한 측정의 원본 영상·결과·라벨이 모두 지워지고 되돌릴 수 없습니다. 필요하면 먼저 내보내기 하세요.")
+            .setMessage("선택한 측정의 원본 영상·결과·실측값이 모두 지워지고 되돌릴 수 없습니다. 필요하면 먼저 내보내기 하세요.")
             .setPositiveButton("삭제") { _, _ ->
                 val failed = sel.count { !SessionStore.delete(this, it.dir) }
                 if (failed > 0) Toast.makeText(this, "${failed}건 삭제 실패", Toast.LENGTH_SHORT).show()

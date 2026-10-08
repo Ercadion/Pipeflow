@@ -339,6 +339,7 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
     private fun startRecording() {
         if (recording) return
         val dir = SessionStore.newSession(this)
+        SessionStore.markPending(dir)          // 저장 전 확인 단계 (결과 화면에서 저장해야 확정)
         sessionDir = dir
         framesOut = BufferedOutputStream(FileOutputStream(File(dir, "frames.y")), 1 shl 20)
         timestamps.clear(); stillW = 0

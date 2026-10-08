@@ -3,7 +3,7 @@
 
 준비: 앱에서 내보낸 측정 zip 들을 개발용 데이터 폴더 하나에 모아 둠 (원본·라벨은 앱 그대로)
   python tools/reeval.py devdata --add 내보낸zip들/*.zip
-    - 같은 측정을 다시 가져오면 meta·결과·라벨(실측값 등)은 새 것으로, 이미 계산한 eval_*.json 은 유지
+    - 같은 측정을 다시 가져오면 meta·결과·실측값 기록은 새 것으로, 이미 계산한 eval_*.json 은 유지
 
 비교:
   # 1) 현재 배포 버전 엔진으로 기준값 만들기 (배포 버전을 git worktree 로 꺼내 그 엔진 경로 지정)
@@ -12,7 +12,7 @@
   # 2) 개발 중인 엔진(이 작업 폴더)으로 재분석 + 기준과 비교
   python tools/reeval.py devdata --version 0.4.0-dev --baseline 0.3.5 --recent 30
 
-  --baseline 을 안 주면: 다른 버전 eval 중 가장 최근 것, 없으면 촬영 당시 앱 자동 결과(result_auto.json)와 비교
+  --baseline 을 안 주면: 다른 버전 eval 중 가장 최근 것, 없으면 촬영 당시 앱 자동 결과(result.json, 예전 형식은 result_auto.json)와 비교
   --recent N : 최근 N개 측정만 (처리량 제한, 0 = 전부)   --force : 이미 있는 eval_<버전>.json 도 다시 계산
 
 결과:

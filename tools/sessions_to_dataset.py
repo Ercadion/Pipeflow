@@ -7,31 +7,72 @@
 결과:
   dataset/images/<세션>.png        첫 프레임(회전 보정된 회색조)
   dataset/sti/<세션>_line<k>.npy   측정선별 시공간영상 (유속 모델용, --sti 옵션)
-  dataset/index.csv               세션별 라벨 (테두리 타원, 수면선 자동/수동, 수심, 유속, 피드백, 메모)
-                                  + 처음 자동 결과(auto_*) 와 사람 수정 후 최종 결과(final_*) 를 나란히
+  dataset/index.csv               측정별 라벨: 테두리 타원, 수면선(자동 / 사람이 고친 / 실측 수심으로 만든), 수심, 유속, 메모
+                                  + 자동 결과(auto_*) 와 사람이 고친 결과(final_*) 를 나란히
 
-세션 파일 (앱 v0.3.4~)
-  result_auto.json  처음 자동 결과 (사람 수정 전, 고정)    result.json  가장 최근(최종) 결과
-  runs.json         분석 회차 기록                         labels.json  auto_feedback / final_feedback / edits / truth_* / 메모
-  eval_<버전>.json  엔진 버전별 재분석 결과 (개발자 PC 의 tools/reeval.py)
-라벨 우선순위: 사용자가 수정한 수면선(manual_waterline) > 자동 결과 + auto_feedback=correct
-(예전 세션의 feedback 은 '자동' 인지 '최종' 인지 모호 → feedback_legacy 열에 그대로)
+측정 폴더 읽기는 session_record.py (앱 v0.3.6 형식과 예전 형식 모두)
+수면선 라벨 우선순위 (label_source)
+  truth_depth  실측 수심 + (고친/자동) 결과의 카메라 자세로 계산한 수면선 (wl_truth, 완전투시일 때)
+  corrected    저장 전 확인에서 사람이 고친 수면선
+  auto_confirmed / final_confirmed / auto_confirmed_legacy   예전 형식의 '맞음' 표시
+  auto_accepted   고치지 않고 저장한 자동 결과 (사람이 보고 저장했지만 확인 정도는 알 수 없음)
+  auto_unverified 저장 전이거나 예전 형식에서 확인 표시 없음
 """
 import argparse, csv, glob, json, os, re, shutil, sys, tempfile, zipfile
+
+import math
 
 import numpy as np
 from PIL import Image
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from session_record import read_session, waterline   # noqa: E402
 
-def load_session(d):
-    meta = json.load(open(os.path.join(d, "meta.json"), encoding="utf-8"))
-    res = json.load(open(os.path.join(d, "result.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "result.json")) else {}
-    lab = json.load(open(os.path.join(d, "labels.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "labels.json")) else {}
-    p_auto = os.path.join(d, "result_auto.json")
-    auto = json.load(open(p_auto, encoding="utf-8")) if os.path.exists(p_auto) else None
-    p_runs = os.path.join(d, "runs.json")
-    runs = json.load(open(p_runs, encoding="utf-8")) if os.path.exists(p_runs) else []
-    return meta, res, lab, auto, runs
+ENGINE = os.path.join(HERE, "..", "android-app", "app", "src", "main", "python")
+
+
+def wl_from_truth(d, meta, ref, truth_depth_mm):
+    """
+    실측 수심 → 영상 속 수면선 끝점 [x1,y1,x2,y2] (회전 보정 영상 px)
+    ref(고친 결과 또는 자동 결과)의 테두리·수면선으로 카메라 자세(관 끝단 원의 3D 위치·기울기)를 구하고,
+    수면 높이만 실측 수심으로 바꿔 투영: 끝점 = C + d·g ± half·u, d = r_in − h, half = √(r_in² − d²)
+    초점거리(완전투시)가 없거나 계산이 안 되면 None
+    """
+    wl, ell = waterline(ref), ((ref or {}).get("overlay") or {}).get("ellipse")
+    if wl is None or ell is None or truth_depth_mm is None:
+        return None
+    intr = meta.get("intrinsics") or {}
+    if not intr.get("f_px"):
+        return None
+    if ENGINE not in sys.path:
+        sys.path.insert(0, ENGINE)
+    import pipeflow_app as PA
+    from pipeflow_core.geometry import Ellipse, project
+    from pipeflow_core.pipeline import measure_level
+    st = meta["still"]
+    rot = int(meta.get("rotation_degrees", 0))
+    still = PA._rot_img(PA._load_y(os.path.join(d, st["file"]), st["width"], st["height"]), rot).astype(np.float64)
+    principal = PA._rot_pt(intr.get("cx", st["width"] / 2), intr.get("cy", st["height"] / 2), st["width"], st["height"], rot)
+    D = float((ref.get("level") or {}).get("diameter_mm") or meta.get("params", {}).get("diameter_mm", 100))
+    lvl = measure_level(still, D, 0.0, rim_is="inner", ellipse=Ellipse.from_dict(ell),
+                        waterline_pts=[[wl[0], wl[1]], [wl[2], wl[3]]], f_px=intr["f_px"], principal=principal,
+                        camera_above=bool(meta.get("params", {}).get("camera_above", True)))
+    if lvl.pose is None:
+        return None
+    r_in = D / 2
+    dd = r_in - float(truth_depth_mm)
+    if not -r_in < dd < r_in:
+        return None
+    P = lvl.pose
+    half = math.sqrt(r_in ** 2 - dd ** 2)
+    O = P["center"] + dd * P["g"]
+    uv = project(P["K"], np.stack([O - half * P["u"], O + half * P["u"]]))
+    a, b = uv[0], uv[1]
+    # 참고 수면선과 같은 방향(왼→오른)으로
+    if (b[0] - a[0]) * (wl[2] - wl[0]) + (b[1] - a[1]) * (wl[3] - wl[1]) < 0:
+        a, b = b, a
+    return [round(float(v), 2) for v in (a[0], a[1], b[0], b[1])]
 
 
 def _summary(r):
@@ -55,6 +96,7 @@ def main():
     ap.add_argument("inputs", nargs="+")
     ap.add_argument("--out", default="dataset")
     ap.add_argument("--sti", action="store_true", help="측정선별 STI 도 저장 (pipeflow_core 필요)")
+    ap.add_argument("--no-truth-line", action="store_true", help="실측 수심 → 수면선 계산 생략 (빠름)")
     a = ap.parse_args()
     os.makedirs(os.path.join(a.out, "images"), exist_ok=True)
     rows = []
@@ -85,59 +127,67 @@ def main():
         if name in seen:
             continue
         seen.add(name)
-        meta, res, lab, auto, runs = load_session(d)
+        S = read_session(d)
+        meta, auto, corr, ann, lab = S["meta"], S["auto"], S["corrected"], S["ann"], S["labels"]
         img = still_image(d, meta)
         Image.fromarray(img).save(os.path.join(a.out, "images", name + ".png"))
-        if auto is None and not lab.get("manual_waterline") and not lab.get("edits") \
-                and not lab.get("legacy_auto_result_lost") and res.get("level", {}).get("rim_source") != "manual_or_previous":
-            auto = res                                 # 예전 세션: 수정 흔적이 없으면 현재 결과 = 자동 결과
-        A, Fn = _summary(auto), _summary(res)       # 처음 자동 / 최종
+        fin = corr or auto or {}
+        A, Fn = _summary(auto), _summary(fin)         # 자동 / 최종(고쳤으면 고친 결과)
         evs = sorted(glob.glob(os.path.join(d, "eval_*.json")), key=os.path.getmtime)
         er = json.load(open(evs[-1], encoding="utf-8")) if evs else None
         E = dict(ver=(er or {}).get("version"), depth=((er or {}).get("level") or {}).get("depth_mm"),
                  v=((er or {}).get("velocity_stiv") or {}).get("v_mean_mps"))
         ell = Fn["ell"] or {}
-        wl_auto = (A["wl"] if auto else None) or lab.get("auto_waterline") or Fn["wl"] or []
-        wl_final = lab.get("manual_waterline") or lab.get("final_waterline") or Fn["wl"] or wl_auto
-        edits = lab.get("edits", [])
-        changed = [e for e in edits if e.get("changed", True)]
-        edited = bool(lab.get("manual_waterline")) or bool(changed)
+        wl_auto = A["wl"] or lab.get("auto_waterline") or []
+        wl_corr = (Fn["wl"] if corr else None) or lab.get("manual_waterline") or lab.get("final_waterline")
+        t_depth = ann.get("truth_depth_mm")
+        wl_truth = None
+        if t_depth is not None and not a.no_truth_line:
+            try:
+                wl_truth = wl_from_truth(d, meta, corr or auto, float(t_depth))
+            except Exception as e:      # 계산 실패는 라벨 없이 계속
+                print(f"  {name}: 실측 수심 수면선 계산 실패 ({type(e).__name__}: {e})")
         auto_fb = lab.get("auto_feedback", "")
-        if lab.get("manual_waterline"):
-            src = "manual"
+        if wl_truth:
+            src, wl_label = "truth_depth", wl_truth
+        elif wl_corr:
+            src, wl_label = "corrected", wl_corr
         elif auto_fb == "correct":
-            src = "auto_confirmed"
-        elif edited and lab.get("final_feedback") == "correct":
-            src = "final_confirmed"
-        elif not edited and lab.get("feedback") == "correct":
-            src = "auto_confirmed_legacy"
+            src, wl_label = "auto_confirmed", wl_auto
+        elif lab.get("feedback") == "correct":
+            src, wl_label = "auto_confirmed_legacy", wl_auto
+        elif S["record"] is not None:
+            src, wl_label = "auto_accepted", wl_auto
         else:
-            src = "auto_unverified"
+            src, wl_label = "auto_unverified", wl_auto
+        k = S["correction"] or {}
         def diff(x, y):
             return None if x is None or y is None else round(y - x, 3)
-        lv = res.get("level", {})
+        lv = fin.get("level", {})
         rows.append(dict(
             session=name, app_version=meta.get("app_version") or ((re.search(r"_v([\w.\-]+)$", name) or [None, ""])[1]).split("_")[0],
-            app_build=meta.get("app_build", ""),
+            app_build=meta.get("app_build", ""), data_format=S["format"], integrity=S["integrity"], pending=S["pending"],
             image=f"images/{name}.png", width=img.shape[1], height=img.shape[0],
             diameter_mm=meta.get("params", {}).get("diameter_mm"),
             ell_cx=ell.get("cx"), ell_cy=ell.get("cy"), ell_a=ell.get("a"), ell_b=ell.get("b"), ell_phi_deg=ell.get("phi_deg"),
             ell_auto=json.dumps(A["ell"]) if auto else "",
-            wl_auto=json.dumps(wl_auto), wl_label=json.dumps(wl_final),
-            label_source=src, edited=edited,
-            edit_types="|".join(sorted({e.get("type", "") for e in changed})), n_runs=len(runs),
+            wl_auto=json.dumps(wl_auto), wl_corrected=json.dumps(wl_corr) if wl_corr else "",
+            wl_truth=json.dumps(wl_truth) if wl_truth else "", wl_label=json.dumps(wl_label),
+            label_source=src, corrected=corr is not None,
+            corr_waterline=bool(k.get("waterline_pts")), corr_rim_redetect=bool(k.get("rim_redetect")),
             auto_feedback=auto_fb, final_feedback=lab.get("final_feedback", ""), feedback_legacy=lab.get("feedback", ""),
-            note=lab.get("note", ""),
-            auto_result_available=auto is not None, legacy_auto_result_lost=bool(lab.get("legacy_auto_result_lost")),
-            # 처음 자동 결과 vs 사람 수정 후 최종 결과
+            note=ann.get("note", ""),
+            auto_result_available=auto is not None, legacy_auto_result_lost=S["auto_lost"],
+            # 자동 결과 vs 최종(고친) 결과
             auto_depth_mm=A["depth"], final_depth_mm=Fn["depth"], depth_change_mm=diff(A["depth"], Fn["depth"]),
             auto_v_surface_mps=A["v"], final_v_surface_mps=Fn["v"],
             auto_Q_Lps=A["q"], final_Q_Lps=Fn["q"], auto_Q_formula_Lps=A["q_formula"], final_Q_formula_Lps=Fn["q_formula"],
-            # 실측 참값 (결과 화면 입력) · 가장 최근 버전 재분석(eval_*.json)
-            truth_depth_mm=lab.get("truth_depth_mm"), truth_v_mean_mps=lab.get("truth_v_mean_mps"), truth_Q_Lps=lab.get("truth_Q_Lps"),
+            # 실측 참값 · 가장 최근 버전 재분석(eval_*.json)
+            truth_depth_mm=t_depth, truth_v_mean_mps=ann.get("truth_v_mean_mps"), truth_Q_Lps=ann.get("truth_Q_Lps"),
+            auto_depth_err_mm=diff(t_depth, A["depth"]) if t_depth is not None else None,
             latest_eval_version=E["ver"], latest_eval_depth_mm=E["depth"], latest_eval_v_mean_mps=E["v"],
             depth_mm=Fn["depth"], method=lv.get("method"), rim_source=lv.get("rim_source"), inner_source=lv.get("inner_source"),
-            v_surface_mps=Fn["v"], fps=res.get("velocity_stiv", {}).get("fps"),
+            v_surface_mps=Fn["v"], fps=(fin.get("velocity_stiv") or {}).get("fps"),
             f_px=(meta.get("intrinsics") or {}).get("f_px"), zoom_ratio=meta.get("zoom_ratio"), device=meta.get("device", ""),
             gravity=json.dumps(meta.get("gravity"))))
     if rows:

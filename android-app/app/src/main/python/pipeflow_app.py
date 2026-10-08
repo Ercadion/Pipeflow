@@ -5,9 +5,10 @@
   meta.json   촬영 정보 (해상도, 회전, 타임스탬프, 카메라 내부파라미터, 중력벡터, 설정값)
   still.y     첫 프레임 Y(밝기) 평면, 원 해상도, uint8 (센서 방향 그대로)
   frames.y    연속 프레임 Y 평면 (T × h × w, uint8, 1/2 해상도)
-  result.json 분석 결과 (이 모듈이 작성)
+  result.json 자동 분석 결과 (촬영 직후 1회, 이 모듈이 작성)
+  result_corrected.json  저장 전 확인 단계에서 사람이 고친 결과 (params.result_name 로 임시 파일에 쓰고 Kotlin 이 확정)
   eval_<버전>.json  개발자 PC 의 tools/reeval.py 가 쓰는 엔진 버전별 재분석 결과 (params.result_name, 앱은 사용 안 함)
-  labels.json 사용자 확인/수정 내용 (Kotlin 이 작성) — 향후 신경망 학습 데이터
+  annotations.json / record.json  실측값 기록 / 저장 정보 (Kotlin 이 작성) — 학습 데이터
 
 analyze(session_dir, params_json, listener) -> result JSON 문자열
 """

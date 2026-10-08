@@ -12,11 +12,26 @@
 
         <TextView android:id="@+id/txtHint" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:textSize="12sp"
-            android:text="초록: 관 테두리 · 빨강: 수면선" />
+            android:text="초록: 관 내경 · 빨강: 수면선" />
+
+        <TextView android:id="@+id/txtMode" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="6dp"
+            android:padding="8dp" android:background="#22888888" android:textSize="13sp" />
+
+        <RadioGroup android:id="@+id/groupView" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="horizontal"
+            android:visibility="gone">
+            <RadioButton android:id="@+id/viewAuto" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content" android:text="자동" />
+            <RadioButton android:id="@+id/viewCorr" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content" android:text="수정" />
+            <RadioButton android:id="@+id/viewBoth" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content" android:text="비교" />
+        </RadioGroup>
 
         <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:indeterminate="true" />
+            android:indeterminate="true" android:visibility="gone" />
         <TextView android:id="@+id/txtProgress" android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
@@ -24,52 +39,30 @@
             android:layout_height="wrap_content" android:layout_marginTop="8dp"
             android:textIsSelectable="true" android:textSize="15sp" />
 
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal">
-            <Button android:id="@+id/btnEdit" style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content" android:text="수면선 수정" />
-            <Button android:id="@+id/btnRerun" android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content" android:layout_marginStart="8dp"
-                android:text="다시 계산" />
-        </LinearLayout>
-        <Button android:id="@+id/btnRedetect" style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="테두리 자동 재검출 (초록 타원이 틀렸을 때)" />
-
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="처음 자동 결과(수정 전)가 맞았나요? (학습 데이터로 저장됩니다)" />
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal">
-            <Button android:id="@+id/btnGood" style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content" android:text="맞음" />
-            <Button android:id="@+id/btnBad" style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content" android:layout_marginStart="8dp"
-                android:text="틀림" />
-        </LinearLayout>
-
-        <LinearLayout android:id="@+id/boxFinal" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+        <!-- 저장 전 확인 단계에서만 보임 -->
+        <LinearLayout android:id="@+id/boxReview" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical"
+            android:layout_marginTop="8dp" android:visibility="gone">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="8dp" android:text="수정한 최종 결과가 맞나요?" />
+                android:text="자동 결과가 틀렸으면 고치세요 (자동 결과는 그대로 함께 저장됩니다)" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:orientation="horizontal">
-                <Button android:id="@+id/btnFinalGood" style="?attr/materialButtonOutlinedStyle"
+                <Button android:id="@+id/btnEdit" style="?attr/materialButtonOutlinedStyle"
                     android:layout_width="0dp" android:layout_weight="1"
-                    android:layout_height="wrap_content" android:text="맞음" />
-                <Button android:id="@+id/btnFinalBad" style="?attr/materialButtonOutlinedStyle"
+                    android:layout_height="wrap_content" android:text="수면선 수정" />
+                <Button android:id="@+id/btnRedetect" style="?attr/materialButtonOutlinedStyle"
                     android:layout_width="0dp" android:layout_weight="1"
                     android:layout_height="wrap_content" android:layout_marginStart="8dp"
-                    android:text="틀림" />
+                    android:text="테두리 재검출" />
             </LinearLayout>
+            <Button android:id="@+id/btnRevert" style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="고친 것 버리고 자동 결과로" android:visibility="gone" />
         </LinearLayout>
 
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="실측값 (알면 입력 — 학습 정답·버전 비교의 기준이 됩니다)" />
+            android:text="실측값 (알면 입력 — 저장 후에도 입력 가능, 학습 정답·버전 비교의 기준)" />
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:hint="실측 수심 (mm, 자로 잰 값)">
@@ -99,6 +92,17 @@
                 android:id="@+id/editNote" android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
         </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout android:id="@+id/boxSave" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="horizontal"
+            android:layout_marginTop="8dp" android:visibility="gone">
+            <Button android:id="@+id/btnDiscard" style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:text="삭제" />
+            <Button android:id="@+id/btnSave" android:layout_width="0dp" android:layout_weight="2"
+                android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                android:text="저장 (이후 결과 변경 불가)" />
+        </LinearLayout>
 
         <Button android:id="@+id/btnExport" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:layout_marginTop="8dp"

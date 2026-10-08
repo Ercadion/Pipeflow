@@ -18,12 +18,15 @@ import java.util.zip.ZipOutputStream
  *   측정 이름(id) = 날짜_시각_v버전 (예: 20261007_192009_v0.3.5) — 목록·zip·PC 도구에서 사용
  *   앱 버전은 build.gradle.kts 의 versionName (BuildConfig.VERSION_NAME) 이 자동으로 붙음
  *   예전(v0.3.4 이전) 측정은 sessions/<yyyyMMdd_HHmmss>/ 그대로 두고 함께 보여 줌
- *   meta.json, still.y, frames.y          촬영 원본
- *   result.json        가장 최근 분석 결과 (다시 계산할 때마다 바뀜)
- *   result_auto.json   처음 자동 분석 결과 (사람 수정 전, 한 번 쓰면 다시 안 바뀜)
- *   runs.json          분석 회차 기록 [{index, kind(auto|manual_waterline|rim_redetect), time_ms, inputs, result}]
- *   labels.json        사람 판단: 자동/최종 피드백, 수정 이력(edits), 메모
- * 모든 세션이 그대로 신경망 학습용 데이터셋이 됨.
+ *
+ * 측정 폴더 = 학습용 데이터 기록 (v0.3.6~). 저장 후에는 원본·결과를 바꾸지 않음
+ *   meta.json, still.y, frames.y   촬영 원본
+ *   result.json             자동 분석 결과 (촬영 직후 1회, 이후 다시 쓰지 않음)
+ *   result_corrected.json   저장 전 확인 단계에서 사람이 고친 결과 (있을 때만, correction 에 무엇을 고쳤는지)
+ *   annotations.json        실측값·메모 (덧붙이기만 하는 기록: 입력 시각·앱 버전과 함께, 지운 값도 이력으로 남음)
+ *   record.json             저장(확정) 정보: 시각, 앱 버전·커밋, 고침 여부, 파일별 SHA-256 (변조 확인용)
+ *   .review_pending         저장 전 확인 중 표시 (저장하면 사라짐, 내보내기에 포함 안 됨)
+ * 예전(v0.3.4~0.3.5) 측정: result_auto.json(자동) + result.json(마지막으로 고친 결과) + labels.json — 읽기만 함
  */
 object SessionStore {
     fun root(ctx: Context): File =
@@ -61,36 +64,105 @@ object SessionStore {
     fun readJson(f: File): JSONObject? =
         if (f.exists()) runCatching { JSONObject(f.readText()) }.getOrNull() else null
 
-    fun writeLabels(dir: File, update: (JSONObject) -> Unit) {
-        val f = File(dir, "labels.json")
-        val o = readJson(f) ?: JSONObject()
-        update(o)
-        o.put("updated_ms", System.currentTimeMillis())
+    // ------------------------------------------------------------------ 측정 기록 (데이터)
+    const val PENDING = ".review_pending"
+
+    /** 저장 전 확인 중인 측정 (촬영 직후 ~ 저장 버튼) */
+    fun isPending(dir: File) = File(dir, PENDING).exists()
+    fun markPending(dir: File) { File(dir, PENDING).writeText("") }
+
+    /** 예전(v0.3.4~0.3.5) 형식인지 */
+    fun isLegacy(dir: File) = File(dir, "result_auto.json").exists() || File(dir, "labels.json").exists()
+
+    /** 자동 분석 결과 (사람이 고치기 전) */
+    fun autoResult(dir: File): JSONObject? =
+        readJson(File(dir, "result_auto.json")) ?: readJson(File(dir, "result.json"))
+
+    /** 사람이 고친 결과 (없으면 null) */
+    fun correctedResult(dir: File): JSONObject? {
+        readJson(File(dir, "result_corrected.json"))?.let { return it }
+        if (File(dir, "result_auto.json").exists()) {          // 예전 형식: result.json 이 마지막으로 고친 결과
+            val a = readJson(File(dir, "result_auto.json")); val r = readJson(File(dir, "result.json"))
+            if (r != null && r.optBoolean("ok") && differs(a, r)) return r
+        }
+        return null
+    }
+
+    /** 수면선(0.5 px)·테두리(0.5 px) 가 다르면 true */
+    fun differs(a: JSONObject?, b: JSONObject?): Boolean {
+        if (a == null || b == null) return false
+        val wa = waterlineOf(a); val wb = waterlineOf(b)
+        if (wa != null && wb != null && (0 until 4).any { kotlin.math.abs(wa[it] - wb[it]) > 0.5 }) return true
+        val ea = a.optJSONObject("overlay")?.optJSONObject("ellipse")
+        val eb = b.optJSONObject("overlay")?.optJSONObject("ellipse")
+        return ea != null && eb != null && listOf("cx", "cy", "a", "b").any { kotlin.math.abs(ea.optDouble(it) - eb.optDouble(it)) > 0.5 }
+    }
+
+    /** 결과의 수면선 [x1,y1,x2,y2] (영상 px) */
+    fun waterlineOf(r: JSONObject?): DoubleArray? {
+        val wl = r?.optJSONObject("overlay")?.optJSONArray("waterline") ?: return null
+        return doubleArrayOf(wl.getJSONArray(0).getDouble(0), wl.getJSONArray(0).getDouble(1),
+            wl.getJSONArray(1).getDouble(0), wl.getJSONArray(1).getDouble(1))
+    }
+
+    val ANNOTATION_FIELDS = listOf("truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps", "note")
+
+    /** 실측값·메모의 현재 값 (기록을 순서대로 반영, 예전 labels.json 값이 기본) */
+    fun annotations(dir: File): JSONObject {
+        val cur = JSONObject()
+        readJson(File(dir, "labels.json"))?.let { lb -> ANNOTATION_FIELDS.forEach { k -> if (lb.has(k) && lb.optString(k) != "") cur.put(k, lb.get(k)) } }
+        readJson(File(dir, "annotations.json"))?.optJSONArray("entries")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val e = arr.getJSONObject(i)
+                val k = e.optString("field")
+                if (e.isNull("value")) cur.remove(k) else cur.put(k, e.get("value"))
+            }
+        }
+        return cur
+    }
+
+    /** 바뀐 실측값·메모만 기록에 덧붙임 (값 null = 지움). 바뀐 것이 있으면 true */
+    fun appendAnnotations(dir: File, values: Map<String, Any?>): Boolean {
+        val cur = annotations(dir)
+        val changed = values.filter { (k, v) ->
+            val old = if (cur.has(k)) cur.get(k) else null
+            if (v == null) old != null else old == null || old.toString() != v.toString()
+        }
+        if (changed.isEmpty()) return false
+        val f = File(dir, "annotations.json")
+        val o = readJson(f) ?: JSONObject().put("entries", JSONArray())
+        val arr = o.optJSONArray("entries") ?: JSONArray().also { o.put("entries", it) }
+        val now = System.currentTimeMillis()
+        changed.forEach { (k, v) ->
+            arr.put(JSONObject().put("time_ms", now).put("app_version", BuildConfig.VERSION_NAME)
+                .put("app_build", BuildConfig.GIT_SHA).put("field", k).put("value", v ?: JSONObject.NULL))
+        }
         f.writeText(o.toString(1))
+        return true
     }
 
-    /** 분석 회차 하나를 runs.json 에 추가하고 회차 번호(1부터) 반환 */
-    fun appendRun(dir: File, entry: JSONObject): Int {
-        val f = File(dir, "runs.json")
-        val arr = if (f.exists()) runCatching { JSONArray(f.readText()) }.getOrNull() ?: JSONArray() else JSONArray()
-        val idx = arr.length() + 1
-        entry.put("index", idx)
-        arr.put(entry)
-        f.writeText(arr.toString(1))
-        return idx
+    fun sha256(f: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        FileInputStream(f).use { ins ->
+            val buf = ByteArray(1 shl 16)
+            while (true) { val n = ins.read(buf); if (n <= 0) break; md.update(buf, 0, n) }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 
-    fun runCount(dir: File): Int {
-        val f = File(dir, "runs.json")
-        return if (f.exists()) runCatching { JSONArray(f.readText()).length() }.getOrNull() ?: 0 else 0
-    }
-
-    /** labels.json 의 edits 배열에 수정 기록 추가 */
-    fun appendEdit(dir: File, edit: JSONObject) = writeLabels(dir) { lb ->
-        val arr = lb.optJSONArray("edits") ?: JSONArray()
-        edit.put("time_ms", System.currentTimeMillis())
-        arr.put(edit)
-        lb.put("edits", arr)
+    /** 저장(확정): record.json 작성 + 확인 중 표시 제거. 이후 원본·결과 파일은 바꾸지 않음 */
+    fun finalize(dir: File) {
+        val sums = JSONObject()
+        listOf("meta.json", "still.y", "frames.y", "result.json", "result_corrected.json").forEach { n ->
+            File(dir, n).takeIf { it.exists() }?.let { sums.put(n, sha256(it)) }
+        }
+        val corr = readJson(File(dir, "result_corrected.json"))
+        val rec = JSONObject().put("finalized_ms", System.currentTimeMillis())
+            .put("app_version", BuildConfig.VERSION_NAME).put("app_build", BuildConfig.GIT_SHA)
+            .put("corrected", corr != null).put("sha256", sums)
+        corr?.optJSONObject("correction")?.let { rec.put("correction", it) }
+        File(dir, "record.json").writeText(rec.toString(1))
+        File(dir, PENDING).delete()
     }
 
     /** 저장소 기준 상대 경로 (예: 20261007/192009_v0.3.5) */
@@ -134,7 +206,7 @@ object SessionStore {
         ZipOutputStream(FileOutputStream(out)).use { zos ->
             zos.setLevel(1)   // 원본 영상(.y)이 커서 빠른 압축
             dirs.forEachIndexed { i, dir ->
-                dir.listFiles()?.filter { it.isFile }?.forEach { f ->
+                dir.listFiles()?.filter { it.isFile && !it.name.startsWith(".") }?.forEach { f ->
                     zos.putNextEntry(ZipEntry("${rel(ctx, dir)}/${f.name}"))
                     FileInputStream(f).use { it.copyTo(zos, 1 shl 16) }
                     zos.closeEntry()
