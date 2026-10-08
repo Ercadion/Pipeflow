@@ -13,9 +13,10 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /**
- * 측정 세션 저장소: <앱 외부 저장소>/sessions/<촬영날짜 yyyyMMdd>/<촬영시각 HHmmss>_v<앱버전>/
- *   예: sessions/20261007/192009_v0.3.5/   (날짜 폴더 하나에 그날 측정들이 모임)
- *   측정 이름(id) = 날짜_시각_v버전 (예: 20261007_192009_v0.3.5) — 목록·zip·PC 도구에서 사용
+ * 측정 세션 저장소: <앱 외부 저장소>/sessions/<촬영날짜 yyyyMMdd>/<촬영시각 HHmmss>_<장소>_<관로ID>_v<앱버전>/
+ *   예: sessions/20261008/231057_서천동-우수관3_P-012_v0.3.7/   (날짜 폴더 하나에 그날 측정들이 모임)
+ *   촬영 직후(저장 전)는 <시각>_v<버전>, 저장할 때 장소·관로 ID 를 넣어 이름을 바꿈 (renameWithPlace)
+ *   측정 이름(id) = 날짜_폴더이름 (예: 20261008_231057_서천동-우수관3_P-012_v0.3.7) — 목록·엑셀·PC 도구에서 사용
  *   앱 버전은 build.gradle.kts 의 versionName (BuildConfig.VERSION_NAME) 이 자동으로 붙음
  *   예전(v0.3.4 이전) 측정은 sessions/<yyyyMMdd_HHmmss>/ 그대로 두고 함께 보여 줌
  *
@@ -23,7 +24,7 @@ import java.util.zip.ZipOutputStream
  *   meta.json, still.y, frames.y   촬영 원본
  *   result.json             자동 분석 결과 (촬영 직후 1회, 이후 다시 쓰지 않음)
  *   result_corrected.json   저장 전 확인 단계에서 사람이 고친 결과 (있을 때만, correction 에 무엇을 고쳤는지)
- *   annotations.json        측정 장소·실측값·메모 (덧붙이기만 하는 기록: 입력 시각·앱 버전과 함께, 지운 값도 이력으로 남음)
+ *   annotations.json        측정 장소·관로 ID·실측값·메모 (덧붙이기만 하는 기록: 입력 시각·앱 버전과 함께, 지운 값도 이력으로 남음)
  *   record.json             저장(확정) 정보: 시각, 앱 버전·커밋, 고침 여부, 파일별 SHA-256 (변조 확인용)
  *   .review_pending         저장 전 확인 중 표시 (저장하면 사라짐. 내보내기에도 포함 → PC 에서 '저장 전' 구분)
  * 예전(v0.3.4~0.3.5) 측정: result_auto.json(자동) + result.json(마지막으로 고친 결과) + labels.json — 읽기만 함
@@ -98,11 +99,30 @@ object SessionStore {
         return ea != null && eb != null && listOf("cx", "cy", "a", "b").any { kotlin.math.abs(ea.optDouble(it) - eb.optDouble(it)) > 0.5 }
     }
 
-    /** 마지막으로 입력한 측정 장소 (다음 측정의 기본값) */
-    fun lastPlace(ctx: Context): String =
-        ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("last_place", "") ?: ""
-    fun setLastPlace(ctx: Context, v: String) {
-        ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("last_place", v).apply()
+    /** 마지막으로 입력한 측정 장소·관로 ID (key = "place" | "pipe_id", 다음 측정의 기본값) */
+    fun lastValue(ctx: Context, key: String): String =
+        ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("last_$key", "") ?: ""
+    fun setLastValue(ctx: Context, key: String, v: String) {
+        ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("last_$key", v).apply()
+    }
+
+    /** 폴더 이름에 넣을 수 있게: 파일 이름에 못 쓰는 글자·공백·'_'(구분자) → '-', 최대 24자 */
+    fun nameSafe(v: String): String =
+        v.trim().replace(Regex("[\\\\/:*?\"<>|_\\s]+"), "-").trim('-', '.').take(24).ifEmpty { "-" }
+
+    /**
+     * 저장할 때 폴더 이름을 '시각_장소_관로ID_v버전' 으로 (같은 장소·관로를 반복 측정해도 시각으로 구분)
+     * 예: sessions/20261008/231057_서천동-우수관3_P-012_v0.3.7/. 실패하면 원래 폴더 그대로 돌려줌
+     */
+    fun renameWithPlace(ctx: Context, dir: File, place: String, pipe: String): File {
+        val time = dir.name.substringBefore('_')
+        if (!time.matches(Regex("\\d{6}"))) return dir                   // 예전 형식 폴더는 그대로
+        val base = "${time}_${nameSafe(place)}_${nameSafe(pipe)}_v${safe(versionOf(dir) ?: BuildConfig.VERSION_NAME)}"
+        if (dir.name == base) return dir
+        var target = File(dir.parentFile, base)
+        var k = 2
+        while (target.exists()) target = File(dir.parentFile, "${base}_$k").also { k++ }
+        return if (dir.renameTo(target)) target else dir
     }
 
     /** 촬영 위치 (meta.json 의 location) → "위도, 경도" 글 (없으면 null) */
@@ -118,7 +138,7 @@ object SessionStore {
             wl.getJSONArray(1).getDouble(0), wl.getJSONArray(1).getDouble(1))
     }
 
-    val ANNOTATION_FIELDS = listOf("place", "truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps", "note")
+    val ANNOTATION_FIELDS = listOf("place", "pipe_id", "truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps", "note")
 
     /** 실측값·메모의 현재 값 (기록을 순서대로 반영, 예전 labels.json 값이 기본) */
     fun annotations(dir: File): JSONObject {
@@ -184,10 +204,10 @@ object SessionStore {
 
     fun safe(v: String) = v.replace(Regex("[^\\w.\\-]"), "_")
 
-    /** 폴더 이름 끝의 _v<버전> (없으면 meta.json 의 app_version, 예전 측정) */
+    /** 폴더 이름 끝의 _v<버전> (마지막 _v 뒤, 같은 초 중복이면 _2 등은 뺌. 없으면 meta.json 의 app_version, 예전 측정) */
     fun versionOf(dir: File): String? =
-        Regex("_v([\\w.\\-]+)$").find(dir.name)?.groupValues?.get(1)
-            ?.substringBefore('_')
+        dir.name.takeIf { it.contains("_v") }?.substringAfterLast("_v")?.substringBefore('_')   // 장소·관로 ID 안의 '_' 는 '-' 로 바뀌어 있음
+            ?.takeIf { it.isNotEmpty() && it[0].isDigit() }
             ?: readJson(File(dir, "meta.json"))?.optString("app_version")?.takeIf { it.isNotEmpty() }
 
     fun sizeOf(dir: File): Long = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
@@ -227,18 +247,15 @@ object SessionStore {
         return xlsx to csvDir
     }
 
-    /** 세션 폴더 하나를 zip 으로 (공유용, 엑셀·CSV 포함) */
-    fun zip(ctx: Context, dir: File): File = zipMany(ctx, listOf(dir), "pipeflow_${id(dir)}.zip") { _, _ -> }
-
     /**
      * 여러 세션 폴더를 zip 하나로 묶어 cache/exports 에 저장 (공유용). zip 안 구조: <날짜>/<시각_v버전>/<파일> (앱 저장 구조 그대로)
-     * + 맨 위에 measurements.xlsx 와 csv/<시트>.csv (엑셀을 못 만들면 원본만). onProgress(완료 세션 수, 전체)
+     * + 맨 위에 measurements.xlsx (엑셀을 못 만들면 원본만). onProgress(완료 세션 수, 전체)
      */
     fun zipMany(ctx: Context, dirs: List<File>, name: String? = null, onProgress: (Int, Int) -> Unit): File {
         val outDir = exportsDir(ctx)
         val ts = stamp()
         val out = File(outDir, name ?: "pipeflow_${dirs.size}sessions_${ts}_v${safe(BuildConfig.VERSION_NAME)}.zip")
-        val excel = runCatching { buildExcel(ctx, dirs, csv = true) }.getOrNull()
+        val excel = runCatching { buildExcel(ctx, dirs).first }.getOrNull()
         ZipOutputStream(FileOutputStream(out)).use { zos ->
             zos.setLevel(1)   // 원본 영상(.y)이 커서 빠른 압축
             fun put(entry: String, f: File) {
@@ -246,10 +263,7 @@ object SessionStore {
                 FileInputStream(f).use { it.copyTo(zos, 1 shl 16) }
                 zos.closeEntry()
             }
-            excel?.let { (xlsx, csvDir) ->
-                put("measurements.xlsx", xlsx)
-                csvDir?.listFiles()?.sortedBy { it.name }?.forEach { put("csv/${it.name}", it) }
-            }
+            excel?.let { put("measurements.xlsx", it) }
             dirs.forEachIndexed { i, dir ->
                 dir.listFiles()?.filter { it.isFile && (!it.name.startsWith(".") || it.name == PENDING) }?.forEach { f ->
                     zos.putNextEntry(ZipEntry("${rel(ctx, dir)}/${f.name}"))

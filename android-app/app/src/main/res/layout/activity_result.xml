@@ -60,12 +60,21 @@
                 android:text="고친 것 버리고 자동 결과로" android:visibility="gone" />
         </LinearLayout>
 
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="측정 장소·관로 ID (필수 — 저장할 때 측정 폴더 이름에 들어가고, 저장 후에는 바꿀 수 없음)" />
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:hint="측정 장소 (예: ○○동 우수관 3번 맨홀) — 다음 측정에 자동으로 채워짐">
+            android:hint="측정 장소 (예: 서천동 우수관 3번 맨홀) — 다음 측정에 자동으로 채워짐">
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/editPlace" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="관로 ID (예: P-012) — 다음 측정에 자동으로 채워짐">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editPipe" android:layout_width="match_parent"
                 android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" />
         </com.google.android.material.textfield.TextInputLayout>
         <TextView android:id="@+id/txtLocation" android:layout_width="match_parent"
@@ -115,8 +124,5 @@
                 android:text="저장 (이후 결과 변경 불가)" />
         </LinearLayout>
 
-        <Button android:id="@+id/btnExport" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="8dp"
-            android:text="측정 데이터 내보내기 (zip 공유)" />
     </LinearLayout>
 </ScrollView>

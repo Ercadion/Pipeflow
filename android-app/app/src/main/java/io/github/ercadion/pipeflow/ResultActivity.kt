@@ -1,6 +1,5 @@
 package io.github.ercadion.pipeflow
 
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.Bundle
@@ -16,7 +15,6 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.FileProvider
 import com.google.android.material.textfield.TextInputEditText
 import org.json.JSONArray
 import org.json.JSONObject
@@ -56,9 +54,9 @@ class ResultActivity : AppCompatActivity() {
     private lateinit var btnRedetect: Button
     private lateinit var btnRevert: Button
     private lateinit var btnSave: Button
-    private lateinit var btnExport: Button
     private lateinit var editNote: TextInputEditText
     private lateinit var editPlace: TextInputEditText
+    private lateinit var editPipe: TextInputEditText
     private lateinit var editTruthDepth: TextInputEditText
     private lateinit var editTruthV: TextInputEditText
     private lateinit var editTruthQ: TextInputEditText
@@ -90,9 +88,9 @@ class ResultActivity : AppCompatActivity() {
         btnRedetect = findViewById(R.id.btnRedetect)
         btnRevert = findViewById(R.id.btnRevert)
         btnSave = findViewById(R.id.btnSave)
-        btnExport = findViewById(R.id.btnExport)
         editNote = findViewById(R.id.editNote)
         editPlace = findViewById(R.id.editPlace)
+        editPipe = findViewById(R.id.editPipe)
         editTruthDepth = findViewById(R.id.editTruthDepth)
         editTruthV = findViewById(R.id.editTruthV)
         editTruthQ = findViewById(R.id.editTruthQ)
@@ -101,9 +99,13 @@ class ResultActivity : AppCompatActivity() {
         loadStillBitmap()
         SessionStore.annotations(dir).let { a ->
             if (a.has("note")) editNote.setText(a.optString("note"))
-            // 측정 장소: 기록된 값, 없으면 (저장 전이면) 마지막으로 입력한 장소
-            if (a.has("place")) editPlace.setText(a.optString("place"))
-            else if (review) editPlace.setText(SessionStore.lastPlace(this))
+            // 측정 장소·관로 ID: 기록된 값, 없으면 (저장 전이면) 마지막으로 입력한 값
+            //   폴더 이름에 들어가므로 저장 후에는 잠금 (예전 측정처럼 값이 없을 때만 입력 가능)
+            fun place(e: TextInputEditText, k: String) {
+                if (a.has(k)) e.setText(a.optString(k)) else if (review) e.setText(SessionStore.lastValue(this, k))
+                e.isEnabled = review || !a.has(k)
+            }
+            place(editPlace, "place"); place(editPipe, "pipe_id")
             fun put(e: TextInputEditText, k: String) { if (a.has(k)) e.setText(a.optDouble(k).toString()) }
             put(editTruthDepth, "truth_depth_mm"); put(editTruthV, "truth_v_mean_mps"); put(editTruthQ, "truth_Q_Lps")
         }
@@ -125,7 +127,6 @@ class ResultActivity : AppCompatActivity() {
         btnRevert.setOnClickListener { revert() }
         btnSave.setOnClickListener { save() }
         findViewById<Button>(R.id.btnDiscard).setOnClickListener { confirmDelete(discard = true) }
-        btnExport.setOnClickListener { export() }
 
         if (review && auto == null) analyzeAuto() else render()
     }
@@ -303,9 +304,21 @@ class ResultActivity : AppCompatActivity() {
         if (!review) return
         if (img.editMode && !finishEdit()) { saveAfterRun = true; return }   // 고치던 수면선 계산 후 저장
         if (running) { saveAfterRun = true; Toast.makeText(this, "계산이 끝나면 저장합니다", Toast.LENGTH_SHORT).show(); return }
+        // 측정 장소·관로 ID 필수 (폴더 이름에 들어감)
+        val place = editPlace.text?.toString()?.trim().orEmpty()
+        val pipe = editPipe.text?.toString()?.trim().orEmpty()
+        if (place.isEmpty() || pipe.isEmpty()) {
+            if (place.isEmpty()) editPlace.error = "측정 장소를 입력하세요"
+            if (pipe.isEmpty()) editPipe.error = "관로 ID를 입력하세요"
+            (if (place.isEmpty()) editPlace else editPipe).requestFocus()
+            Toast.makeText(this, "측정 장소와 관로 ID를 입력해야 저장할 수 있습니다", Toast.LENGTH_LONG).show()
+            return
+        }
         saveAnnotations()
-        SessionStore.setLastPlace(this, editPlace.text?.toString()?.trim() ?: "")
+        SessionStore.setLastValue(this, "place", place)
+        SessionStore.setLastValue(this, "pipe_id", pipe)
         SessionStore.finalize(dir)
+        dir = SessionStore.renameWithPlace(this, dir, place, pipe)     // 시각_장소_관로ID_v버전
         review = false
         Toast.makeText(this, if (corr != null) "저장했습니다 (자동 결과 + 고친 결과)" else "저장했습니다", Toast.LENGTH_SHORT).show()
         finish()
@@ -315,12 +328,11 @@ class ResultActivity : AppCompatActivity() {
     private fun updateButtons() {
         val hasCorr = corr != null
         txtMode.text = when {
-            review -> "저장 전 확인 — 자동 결과가 틀렸으면 지금 고치세요. 저장한 뒤에는 결과를 바꿀 수 없습니다 (실측값·메모는 나중에도 입력 가능)."
+            review -> "저장 전 확인 — 자동 결과가 틀렸으면 지금 고치세요. 측정 장소·관로 ID 입력 후 저장. 저장한 뒤에는 결과·장소·관로 ID를 바꿀 수 없습니다 (실측값·메모는 나중에도 입력 가능)."
             else -> savedInfo()
         }
         boxReview.visibility = if (review) View.VISIBLE else View.GONE
         boxSave.visibility = if (review) View.VISIBLE else View.GONE
-        btnExport.visibility = if (review) View.GONE else View.VISIBLE
         btnRevert.visibility = if (review && hasCorr) View.VISIBLE else View.GONE
         groupView.visibility = if (hasCorr && !img.editMode) View.VISIBLE else View.GONE
         listOf(btnEdit, btnRedetect, btnRevert, btnSave).forEach { it.isEnabled = !running }
@@ -551,32 +563,19 @@ class ResultActivity : AppCompatActivity() {
             .setNegativeButton("취소", null).show()
     }
 
-    // ------------------------------------------------------------------ 실측값·내보내기
+    // ------------------------------------------------------------------ 장소·실측값·메모
     /** 실측값·메모 → annotations.json (바뀐 값만 이력으로 덧붙임, 비우면 지움 기록) */
     private fun saveAnnotations() {
         fun num(e: TextInputEditText) = e.text?.toString()?.trim()?.replace(',', '.')?.toDoubleOrNull()
         val note = editNote.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
         val place = editPlace.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+        val pipe = editPipe.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
         SessionStore.appendAnnotations(dir, mapOf(
             "truth_depth_mm" to num(editTruthDepth),
             "truth_v_mean_mps" to num(editTruthV),
             "truth_Q_Lps" to num(editTruthQ),
             "place" to place,
+            "pipe_id" to pipe,
             "note" to note))
-    }
-
-    private fun export() {
-        saveAnnotations()
-        worker.execute {
-            val zip = SessionStore.zip(this, dir)
-            val uri = FileProvider.getUriForFile(this, "$packageName.files", zip)
-            runOnUiThread {
-                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                    type = "application/zip"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }, "측정 데이터 공유"))
-            }
-        }
     }
 }

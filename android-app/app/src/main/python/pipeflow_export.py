@@ -30,13 +30,13 @@ SCHEMA_VERSION = "1.0"
 
 # (영문 키, 열 이름, 단위, 숫자 서식, 설명, 추가된 양식 버전)
 SUMMARY = [
-    ("id", "측정ID", "", "@", "측정 이름 = 촬영날짜_촬영시각_v앱버전. 모든 시트의 연결 키", "1.0"),
+    ("id", "측정ID", "", "@", "측정 이름 = 촬영날짜_촬영시각_장소_관로ID_v앱버전. 모든 시트의 연결 키", "1.0"),
     ("date", "날짜", "", "yyyy-mm-dd", "촬영 날짜", "1.0"),
     ("time", "시각", "", "hh:mm:ss", "촬영 시각 (폰 시간)", "1.0"),
     ("lat", "위도", "°", "0.000000", "촬영 위치 위도 (GPS, 못 잡았으면 빈칸)", "1.0"),
     ("lon", "경도", "°", "0.000000", "촬영 위치 경도 (GPS, 못 잡았으면 빈칸)", "1.0"),
-    ("place", "장소명", "", "@", "앱에서 저장할 때 입력한 측정 장소 (나중에 고쳤으면 최신 값)", "1.0"),
-    ("pipe_id", "관로ID", "", "@", "관로 식별 번호 (예정 — 지금은 빈칸)", "1.0"),
+    ("place", "장소명", "", "@", "앱에서 저장할 때 입력한 측정 장소 (필수, 저장 후 변경 불가)", "1.0"),
+    ("pipe_id", "관로ID", "", "@", "앱에서 저장할 때 입력한 관로 식별 번호 (필수, 저장 후 변경 불가)", "1.0"),
     ("app_version", "앱 버전", "", "@", "촬영한 앱 버전", "1.0"),
     ("status", "상태", "", "@", "저장 / 저장 전(앱에서 아직 확인 중) / 예전 형식", "1.0"),
     ("corrected", "수정 여부", "", "@", "예 = 저장 전 확인 단계에서 사람이 수면선·테두리를 고침 (값은 고친 결과)", "1.0"),
@@ -101,26 +101,33 @@ CAPTURE = [
 HISTORY = [
     ("id", "측정ID", "", "@", "", "1.0"),
     ("when", "입력 시각", "", "yyyy-mm-dd hh:mm:ss", "값을 입력·수정한 시각 (예전 형식은 빈칸)", "1.0"),
-    ("field", "항목", "", "@", "장소명 / 실측 수심 / 실측 평균유속 / 실측 유량 / 메모", "1.0"),
+    ("field", "항목", "", "@", "장소명 / 관로ID / 실측 수심 / 실측 평균유속 / 실측 유량 / 메모", "1.0"),
     ("value", "값", "", "General", "입력한 값 (빈칸 = 지움)", "1.0"),
     ("app_version", "앱 버전", "", "@", "입력할 때의 앱 버전", "1.0"),
 ]
 
+TABLE_NAMES = {"측정요약": "tbl_summary", "자동vs수정": "tbl_compare", "유속분포": "tbl_profile",
+               "촬영조건": "tbl_capture", "입력이력": "tbl_history"}
+
 SHEETS = [("측정요약", SUMMARY), ("자동vs수정", COMPARE), ("유속분포", PROFILE),
           ("촬영조건", CAPTURE), ("입력이력", HISTORY)]
 
-FIELD_NAMES = dict(place="장소명", truth_depth_mm="실측 수심[mm]", truth_v_mean_mps="실측 평균유속[m/s]",
+FIELD_NAMES = dict(place="장소명", pipe_id="관로ID", truth_depth_mm="실측 수심[mm]", truth_v_mean_mps="실측 평균유속[m/s]",
                    truth_Q_Lps="실측 유량[L/s]", note="메모")
 
 
-def _width(v):
-    """엑셀 열 너비용 글자 폭 (한글 등은 2칸, 날짜·시각은 고정)"""
+def _width(v, fmt="General"):
+    """엑셀 열 너비용 글자 폭 (한글 등은 2칸, 날짜·시각은 고정, 숫자는 표시 서식대로)"""
     if v is None:
         return 0
+    if isinstance(v, _dt.datetime):
+        return 19
     if isinstance(v, (_dt.date, _dt.time)):
         return 10
-    if isinstance(v, float):
-        return len(f"{v:.6g}")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        m = re.search(r"0\.(0+)", fmt)
+        d = len(m.group(1)) if m else (0 if fmt.lstrip("+").startswith("0") else 6)
+        return len(f"{v:+.{d}f}") + 1
     return sum(2 if ord(ch) > 0x2E80 else 1 for ch in str(v))
 
 
@@ -185,8 +192,8 @@ def _rows_for(path):
     status = "저장" if S["record"] is not None else ("저장 전" if S["pending"] else "예전 형식")
     summary = dict(
         id=sid, date=date, time=time, lat=_num(loc.get("lat")), lon=_num(loc.get("lon")),
-        place=ann.get("place"), pipe_id=None,
-        app_version=meta.get("app_version") or ((re.search(r"_v([\w.\-]+)$", sid) or [None, ""])[1]).split("_")[0],
+        place=ann.get("place"), pipe_id=ann.get("pipe_id"),
+        app_version=meta.get("app_version") or (sid.rsplit("_v", 1)[1].split("_")[0] if "_v" in sid else None),
         status=status, corrected="예" if corr is not None else "아니오",
         diameter_mm=_num(lv.get("diameter_mm")) or _num(params.get("diameter_mm")),
         depth_mm=depth, fill_pct=None if fill is None else fill * 100,
@@ -313,12 +320,14 @@ def write_xlsx(paths, out_path, created_by="", csv_dir=None):
             ws.cell(1, j).alignment = Alignment(wrap_text=True, vertical="center")
             for i in range(2, n + 2):
                 ws.cell(i, j).number_format = c[3]
-            w = max([_width(_header(c)) + 2] + [_width(ws.cell(i, j).value) + 2 for i in range(2, min(n, 300) + 2)])
+            # 머리글은 필터 단추(▼) 자리까지, 숫자는 표시 서식(소수 자리) 기준
+            w = max([_width(_header(c)) + 5] + [_width(ws.cell(i, j).value, c[3]) + 2 for i in range(2, min(n, 300) + 2)])
             ws.column_dimensions[L].width = min(max(w, 8), 45)
         ws.freeze_panes = "B2"
         if n:
             ref = f"A1:{get_column_letter(len(cols))}{n + 1}"
-            t = Table(displayName=f"T{ti + 1}", ref=ref)
+            # 표 이름: 'T1' 처럼 셀 주소로 읽히는 이름은 엑셀이 손상으로 보고 복구함 → 셀 주소가 될 수 없는 영문 이름
+            t = Table(displayName=TABLE_NAMES[name], ref=ref)
             t.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
             ws.add_table(t)
         # 눈에 띄게: 고친 측정, 낮은 신뢰도, 무결성 이상

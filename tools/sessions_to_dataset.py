@@ -165,7 +165,7 @@ def main():
             return None if x is None or y is None else round(y - x, 3)
         lv = fin.get("level", {})
         rows.append(dict(
-            session=name, app_version=meta.get("app_version") or ((re.search(r"_v([\w.\-]+)$", name) or [None, ""])[1]).split("_")[0],
+            session=name, app_version=meta.get("app_version") or (name.rsplit("_v", 1)[1].split("_")[0] if "_v" in name else None),
             app_build=meta.get("app_build", ""), data_format=S["format"], integrity=S["integrity"], pending=S["pending"],
             image=f"images/{name}.png", width=img.shape[1], height=img.shape[0],
             diameter_mm=meta.get("params", {}).get("diameter_mm"),

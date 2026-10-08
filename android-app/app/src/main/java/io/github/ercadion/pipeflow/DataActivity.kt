@@ -22,7 +22,7 @@ import java.util.concurrent.Executors
 /**
  * 측정 데이터 관리 (메뉴 → 측정 데이터)
  *  - 앱 저장소의 측정 목록: 날짜·시각, 앱 버전(폴더 이름 끝 _v…), 수심·유속, 저장 전/수정됨/실측값 여부, 크기
- *  - 체크해서 선택 → 선택한 측정을 zip 하나로 내보내기(원본 + 엑셀·CSV), 엑셀만 내보내기(수치만), 삭제
+ *  - 체크해서 선택 → 선택한 측정을 zip 하나로 내보내기(원본 + 엑셀), 엑셀만 내보내기(수치만), 삭제
  *  - 항목 누르기 → 결과 화면
  */
 class DataActivity : AppCompatActivity() {
@@ -124,7 +124,8 @@ class DataActivity : AppCompatActivity() {
             else String.format(Locale.US, "수심 %.1f mm", it.optDouble("depth_mm"))
         }
         st?.let { parts += String.format(Locale.US, "표면유속 %.3f m/s", it.optDouble("v_surface_mps")) }
-        ann.optString("place").takeIf { it.isNotEmpty() }?.let { parts.add(0, it) }
+        listOf("place", "pipe_id").map { ann.optString(it) }.filter { it.isNotEmpty() }
+            .takeIf { it.isNotEmpty() }?.let { parts.add(0, it.joinToString(" / ")) }      // 장소 / 관로 ID
         val flags = mutableListOf<String>()
         if (SessionStore.isPending(dir)) flags += "저장 전"
         if (corr != null) flags += "수정됨"

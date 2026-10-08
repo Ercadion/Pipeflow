@@ -4,7 +4,7 @@
 앱 v0.3.6~ (저장 전 확인 단계에서만 고침, 저장 후 결과 불변)
   result.json            자동 분석 결과 (촬영 직후 1회)
   result_corrected.json  저장 전 확인 단계에서 사람이 고친 결과 (있을 때만) — correction: 무엇을 고쳤는지
-  annotations.json       측정 장소·실측값·메모 이력 {entries: [{time_ms, app_version, app_build, field, value}]} (value null = 지움)
+  annotations.json       측정 장소·관로 ID·실측값·메모 이력 {entries: [{time_ms, app_version, app_build, field, value}]} (value null = 지움)
   record.json            저장 정보 + 파일별 sha256
   .review_pending        저장 전 (앱에서 아직 저장 안 함 — 내보낸 zip 에도 들어 있음)
 예전 v0.3.4~0.3.5: result_auto.json(자동) + result.json(마지막으로 고친 결과) + labels.json(truth_*, note, 피드백)
@@ -16,7 +16,7 @@ import hashlib
 import json
 import os
 
-ANNOTATION_FIELDS = ("place", "truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps", "note")
+ANNOTATION_FIELDS = ("place", "pipe_id", "truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps", "note")
 
 
 def load_json(path):
