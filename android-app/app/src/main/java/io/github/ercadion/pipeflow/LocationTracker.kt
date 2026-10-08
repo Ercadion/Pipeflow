@@ -29,13 +29,14 @@ class LocationTracker(private val ctx: Context) : LocationListener {
 
     @SuppressLint("MissingPermission")
     fun start() {
-        if (running || lm == null || !hasPermission()) return
+        val m = lm ?: return               // 위치 서비스 없는 기기
+        if (running || !hasPermission()) return
         running = true
         for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
             runCatching {
-                if (lm.isProviderEnabled(p)) {
-                    lm.getLastKnownLocation(p)?.let { consider(it) }       // 최근 값이면 바로 사용 (나이는 아래에서 확인)
-                    lm.requestLocationUpdates(p, 1000L, 0f, this, Looper.getMainLooper())
+                if (m.isProviderEnabled(p)) {
+                    m.getLastKnownLocation(p)?.let { consider(it) }       // 최근 값이면 바로 사용 (나이는 아래에서 확인)
+                    m.requestLocationUpdates(p, 1000L, 0f, this, Looper.getMainLooper())
                 }
             }
         }
