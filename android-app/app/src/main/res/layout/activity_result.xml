@@ -60,6 +60,17 @@
                 android:text="고친 것 버리고 자동 결과로" android:visibility="gone" />
         </LinearLayout>
 
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="측정 장소 (예: ○○동 우수관 3번 맨홀) — 다음 측정에 자동으로 채워짐">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editPlace" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <TextView android:id="@+id/txtLocation" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textSize="12sp" />
+
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:text="실측값 (알면 입력 — 저장 후에도 입력 가능, 학습 정답·버전 비교의 기준)" />

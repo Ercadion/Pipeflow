@@ -22,7 +22,7 @@ import java.util.concurrent.Executors
 /**
  * 측정 데이터 관리 (메뉴 → 측정 데이터)
  *  - 앱 저장소의 측정 목록: 날짜·시각, 앱 버전(폴더 이름 끝 _v…), 수심·유속, 저장 전/수정됨/실측값 여부, 크기
- *  - 체크해서 선택 → 선택한 측정을 zip 하나로 내보내기(공유) 또는 삭제
+ *  - 체크해서 선택 → 선택한 측정을 zip 하나로 내보내기(원본 + 엑셀·CSV), 엑셀만 내보내기(수치만), 삭제
  *  - 항목 누르기 → 결과 화면
  */
 class DataActivity : AppCompatActivity() {
@@ -35,6 +35,7 @@ class DataActivity : AppCompatActivity() {
     private lateinit var btnAll: Button
     private lateinit var btnExport: Button
     private lateinit var btnDelete: Button
+    private lateinit var btnExcel: Button
     private lateinit var progress: ProgressBar
     private val worker = Executors.newSingleThreadExecutor()
     private var items: List<Item> = emptyList()
@@ -67,6 +68,7 @@ class DataActivity : AppCompatActivity() {
         btnAll = findViewById(R.id.btnAll)
         btnExport = findViewById(R.id.btnExport)
         btnDelete = findViewById(R.id.btnDelete)
+        btnExcel = findViewById(R.id.btnExcel)
         progress = findViewById(R.id.progress)
         progress.visibility = View.GONE
         list.adapter = adapter
@@ -80,6 +82,7 @@ class DataActivity : AppCompatActivity() {
         }
         btnExport.setOnClickListener { export() }
         btnDelete.setOnClickListener { confirmDelete() }
+        btnExcel.setOnClickListener { exportExcel() }
     }
 
     override fun onResume() {
@@ -121,6 +124,7 @@ class DataActivity : AppCompatActivity() {
             else String.format(Locale.US, "수심 %.1f mm", it.optDouble("depth_mm"))
         }
         st?.let { parts += String.format(Locale.US, "표면유속 %.3f m/s", it.optDouble("v_surface_mps")) }
+        ann.optString("place").takeIf { it.isNotEmpty() }?.let { parts.add(0, it) }
         val flags = mutableListOf<String>()
         if (SessionStore.isPending(dir)) flags += "저장 전"
         if (corr != null) flags += "수정됨"
@@ -136,6 +140,7 @@ class DataActivity : AppCompatActivity() {
             items.size, items.sumOf { it.bytes } / 1e6, sel.size, sel.sumOf { it.bytes } / 1e6)
         btnExport.isEnabled = sel.isNotEmpty() && !busy
         btnDelete.isEnabled = sel.isNotEmpty() && !busy
+        btnExcel.isEnabled = sel.isNotEmpty() && !busy
         btnAll.text = if (items.isNotEmpty() && items.all { it.checked }) "선택 해제" else "전체 선택"
     }
 
@@ -152,6 +157,7 @@ class DataActivity : AppCompatActivity() {
         if (sel.isEmpty()) return
         setBusy(true)
         progress.max = sel.size; progress.progress = 0
+        txtSummary.text = "엑셀 만드는 중… (처음 실행 시 Python 로딩에 몇 초 걸림)"
         worker.execute {
             val res = runCatching {
                 SessionStore.zipMany(this, sel) { done, total ->
@@ -169,6 +175,32 @@ class DataActivity : AppCompatActivity() {
                     }, String.format(Locale.US, "측정 %d건 내보내기 (%.1f MB)", sel.size, zip.length() / 1e6)))
                 }.onFailure { e ->
                     Toast.makeText(this, "압축 실패: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    /** 선택한 측정 → 엑셀(.xlsx) 하나 → 공유 (원본 영상 없이 수치만, 회사 분석용) */
+    private fun exportExcel() {
+        val sel = items.filter { it.checked }.map { it.dir }
+        if (sel.isEmpty()) return
+        setBusy(true)
+        progress.isIndeterminate = true
+        txtSummary.text = "엑셀 만드는 중… (처음 실행 시 Python 로딩에 몇 초 걸림)"
+        worker.execute {
+            val res = runCatching { SessionStore.buildExcel(this, sel).first }
+            runOnUiThread {
+                progress.isIndeterminate = false
+                setBusy(false)
+                res.onSuccess { xlsx ->
+                    val uri = FileProvider.getUriForFile(this, "$packageName.files", xlsx)
+                    startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                        type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }, "측정 ${sel.size}건 엑셀 내보내기"))
+                }.onFailure { e ->
+                    Toast.makeText(this, "엑셀 만들기 실패: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }

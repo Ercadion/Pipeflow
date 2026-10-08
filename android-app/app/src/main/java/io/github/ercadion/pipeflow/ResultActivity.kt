@@ -58,6 +58,7 @@ class ResultActivity : AppCompatActivity() {
     private lateinit var btnSave: Button
     private lateinit var btnExport: Button
     private lateinit var editNote: TextInputEditText
+    private lateinit var editPlace: TextInputEditText
     private lateinit var editTruthDepth: TextInputEditText
     private lateinit var editTruthV: TextInputEditText
     private lateinit var editTruthQ: TextInputEditText
@@ -91,6 +92,7 @@ class ResultActivity : AppCompatActivity() {
         btnSave = findViewById(R.id.btnSave)
         btnExport = findViewById(R.id.btnExport)
         editNote = findViewById(R.id.editNote)
+        editPlace = findViewById(R.id.editPlace)
         editTruthDepth = findViewById(R.id.editTruthDepth)
         editTruthV = findViewById(R.id.editTruthV)
         editTruthQ = findViewById(R.id.editTruthQ)
@@ -99,9 +101,14 @@ class ResultActivity : AppCompatActivity() {
         loadStillBitmap()
         SessionStore.annotations(dir).let { a ->
             if (a.has("note")) editNote.setText(a.optString("note"))
+            // 측정 장소: 기록된 값, 없으면 (저장 전이면) 마지막으로 입력한 장소
+            if (a.has("place")) editPlace.setText(a.optString("place"))
+            else if (review) editPlace.setText(SessionStore.lastPlace(this))
             fun put(e: TextInputEditText, k: String) { if (a.has(k)) e.setText(a.optDouble(k).toString()) }
             put(editTruthDepth, "truth_depth_mm"); put(editTruthV, "truth_v_mean_mps"); put(editTruthQ, "truth_Q_Lps")
         }
+        findViewById<TextView>(R.id.txtLocation).text =
+            SessionStore.locationText(dir)?.let { "촬영 위치(GPS): $it" } ?: "촬영 위치(GPS): 기록 없음 (위치 권한 없음 또는 신호 없음)"
         auto = SessionStore.autoResult(dir)
         corr = SessionStore.correctedResult(dir)
         view = if (corr != null) View3.BOTH else View3.AUTO
@@ -297,6 +304,7 @@ class ResultActivity : AppCompatActivity() {
         if (img.editMode && !finishEdit()) { saveAfterRun = true; return }   // 고치던 수면선 계산 후 저장
         if (running) { saveAfterRun = true; Toast.makeText(this, "계산이 끝나면 저장합니다", Toast.LENGTH_SHORT).show(); return }
         saveAnnotations()
+        SessionStore.setLastPlace(this, editPlace.text?.toString()?.trim() ?: "")
         SessionStore.finalize(dir)
         review = false
         Toast.makeText(this, if (corr != null) "저장했습니다 (자동 결과 + 고친 결과)" else "저장했습니다", Toast.LENGTH_SHORT).show()
@@ -548,10 +556,12 @@ class ResultActivity : AppCompatActivity() {
     private fun saveAnnotations() {
         fun num(e: TextInputEditText) = e.text?.toString()?.trim()?.replace(',', '.')?.toDoubleOrNull()
         val note = editNote.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+        val place = editPlace.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
         SessionStore.appendAnnotations(dir, mapOf(
             "truth_depth_mm" to num(editTruthDepth),
             "truth_v_mean_mps" to num(editTruthV),
             "truth_Q_Lps" to num(editTruthQ),
+            "place" to place,
             "note" to note))
     }
 

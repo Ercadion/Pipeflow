@@ -3,7 +3,7 @@
 앱 사용자에게는 보이지 않는, 배포 전 점검·학습 데이터 정리용 도구입니다.
 
 ## 준비 (한 번)
-- Python 3.10 이상, `pip install numpy pillow`
+- Python 3.10 이상, `pip install numpy pillow openpyxl`
 - 이 저장소(pipeflow) 폴더에서 실행 — 엔진은 앱과 같은 코드(`android-app/app/src/main/python`)를 그대로 씀
 
 ## 1. 측정 데이터 모으기
@@ -43,7 +43,17 @@ python tools/reeval.py devdata --version 0.4.0-dev --baseline 0.3.5 --recent 30
 
 배포 판단 예: 참값 있는 측정의 평균 오차가 줄고, 악화·실패가 없거나 설명 가능하면 배포.
 
-## 4. 학습 데이터 표
+## 4. 엑셀 (회사 분석용)
+앱의 '엑셀로 내보내기' 와 같은 코드라 양식이 똑같음. 모아 둔 측정 전체를 엑셀 하나로:
+```
+pip install openpyxl
+python tools/export_excel.py devdata --out measurements.xlsx
+python tools/export_excel.py devdata 받은zip들/*.zip --out all.xlsx --csv csv폴더
+python tools/export_excel.py devdata --since 20261001 --until 20261031 --out 10월.xlsx
+```
+- 같은 측정ID 는 한 번만. 열 설명은 엑셀의 '데이터사전' 시트
+
+## 5. 학습 데이터 표
 ```
 python tools/sessions_to_dataset.py devdata --out dataset
 ```

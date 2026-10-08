@@ -24,4 +24,7 @@
             android:layout_height="wrap_content" android:layout_marginStart="6dp"
             android:text="선택 삭제" />
     </LinearLayout>
+    <Button android:id="@+id/btnExcel" android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="선택 엑셀로 내보내기 (.xlsx · 수치만, 가벼움)" />
 </LinearLayout>

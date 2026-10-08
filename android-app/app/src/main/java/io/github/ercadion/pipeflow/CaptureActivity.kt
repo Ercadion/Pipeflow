@@ -131,8 +131,14 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
     private var gravN = 0
     @Volatile private var gyroMag = 0.0
 
-    private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) startCamera() else { Toast.makeText(this, "카메라 권한이 필요합니다", Toast.LENGTH_LONG).show(); finish() }
+    // 촬영 위치 (위치 권한은 선택 — 거부해도 측정은 됨, 위도·경도만 비어 있음)
+    private lateinit var locTracker: LocationTracker
+
+    private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        if (res[Manifest.permission.ACCESS_FINE_LOCATION] == true || res[Manifest.permission.ACCESS_COARSE_LOCATION] == true)
+            locTracker.start()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+        else { Toast.makeText(this, "카메라 권한이 필요합니다", Toast.LENGTH_LONG).show(); finish() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -149,8 +155,20 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         btnRecord.setOnClickListener { startRecording() }
         btnTorch.setOnClickListener { setTorch(!torchOn) }
         setupGestures()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
-            startCamera() else permLauncher.launch(Manifest.permission.CAMERA)
+        locTracker = LocationTracker(this)
+        val camOk = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val askLoc = !locTracker.hasPermission() && !prefs.getBoolean("location_asked", false)
+        if (camOk && !askLoc) startCamera()
+        else {
+            val req = mutableListOf<String>()
+            if (!camOk) req += Manifest.permission.CAMERA
+            if (askLoc) {       // 위치 권한은 처음 한 번만 물음 (거부하면 다시 묻지 않음)
+                req += Manifest.permission.ACCESS_FINE_LOCATION; req += Manifest.permission.ACCESS_COARSE_LOCATION
+                prefs.edit().putBoolean("location_asked", true).apply()
+            }
+            permLauncher.launch(req.toTypedArray())
+        }
     }
 
     override fun onResume() {
@@ -161,11 +179,13 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
         }
+        locTracker.start()
     }
 
     override fun onPause() {
         super.onPause()
         sensorManager.unregisterListener(this)
+        locTracker.stop()
     }
 
     override fun onDestroy() {
@@ -570,6 +590,7 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         roiAtStart?.let { meta.put("touch_roi", JSONArray(it.toList())) }
         if (gravN > 0) meta.put("gravity", JSONArray(gravSum.map { it / gravN }))
         meta.put("params", settings.toParams())
+        locTracker.toJson()?.let { meta.put("location", it) }   // 촬영 위치 (못 잡았으면 기록 안 함)
         // 실시간으로 포착한 테두리 → 회전 보정된 still 좌표로 저장 (분석 시 정밀화의 시작값)
         liveEllipseAtStart?.let { e ->
             val c = toUpright(e.cx, e.cy, stillW, stillH, rotation)

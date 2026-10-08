@@ -70,6 +70,7 @@ chaquopy {
         version = "3.10"
         pip {
             install("numpy")
+            install("openpyxl==3.1.5")      // 측정 데이터 엑셀 내보내기 (순수 Python)
         }
     }
 }

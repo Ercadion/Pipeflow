@@ -23,9 +23,9 @@ import java.util.zip.ZipOutputStream
  *   meta.json, still.y, frames.y   촬영 원본
  *   result.json             자동 분석 결과 (촬영 직후 1회, 이후 다시 쓰지 않음)
  *   result_corrected.json   저장 전 확인 단계에서 사람이 고친 결과 (있을 때만, correction 에 무엇을 고쳤는지)
- *   annotations.json        실측값·메모 (덧붙이기만 하는 기록: 입력 시각·앱 버전과 함께, 지운 값도 이력으로 남음)
+ *   annotations.json        측정 장소·실측값·메모 (덧붙이기만 하는 기록: 입력 시각·앱 버전과 함께, 지운 값도 이력으로 남음)
  *   record.json             저장(확정) 정보: 시각, 앱 버전·커밋, 고침 여부, 파일별 SHA-256 (변조 확인용)
- *   .review_pending         저장 전 확인 중 표시 (저장하면 사라짐, 내보내기에 포함 안 됨)
+ *   .review_pending         저장 전 확인 중 표시 (저장하면 사라짐. 내보내기에도 포함 → PC 에서 '저장 전' 구분)
  * 예전(v0.3.4~0.3.5) 측정: result_auto.json(자동) + result.json(마지막으로 고친 결과) + labels.json — 읽기만 함
  */
 object SessionStore {
@@ -98,6 +98,19 @@ object SessionStore {
         return ea != null && eb != null && listOf("cx", "cy", "a", "b").any { kotlin.math.abs(ea.optDouble(it) - eb.optDouble(it)) > 0.5 }
     }
 
+    /** 마지막으로 입력한 측정 장소 (다음 측정의 기본값) */
+    fun lastPlace(ctx: Context): String =
+        ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("last_place", "") ?: ""
+    fun setLastPlace(ctx: Context, v: String) {
+        ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putString("last_place", v).apply()
+    }
+
+    /** 촬영 위치 (meta.json 의 location) → "위도, 경도" 글 (없으면 null) */
+    fun locationText(dir: File): String? {
+        val l = readJson(File(dir, "meta.json"))?.optJSONObject("location") ?: return null
+        return String.format(java.util.Locale.US, "%.6f, %.6f", l.optDouble("lat"), l.optDouble("lon"))
+    }
+
     /** 결과의 수면선 [x1,y1,x2,y2] (영상 px) */
     fun waterlineOf(r: JSONObject?): DoubleArray? {
         val wl = r?.optJSONObject("overlay")?.optJSONArray("waterline") ?: return null
@@ -105,7 +118,7 @@ object SessionStore {
             wl.getJSONArray(1).getDouble(0), wl.getJSONArray(1).getDouble(1))
     }
 
-    val ANNOTATION_FIELDS = listOf("truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps", "note")
+    val ANNOTATION_FIELDS = listOf("place", "truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps", "note")
 
     /** 실측값·메모의 현재 값 (기록을 순서대로 반영, 예전 labels.json 값이 기본) */
     fun annotations(dir: File): JSONObject {
@@ -190,23 +203,55 @@ object SessionStore {
         return ok
     }
 
-    /** 세션 폴더 하나를 zip 으로 (공유용) */
+    /** 내보내기 파일 폴더 (cache/exports, 1시간 지난 파일은 정리) */
+    private fun exportsDir(ctx: Context): File {
+        val outDir = File(ctx.cacheDir, "exports").apply { mkdirs() }
+        val now = System.currentTimeMillis()
+        outDir.listFiles()?.filter { now - it.lastModified() > 3_600_000L }?.forEach { it.deleteRecursively() }
+        return outDir
+    }
+
+    private fun stamp() = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+
+    /**
+     * 측정들 → 엑셀(.xlsx) — 시트: 측정요약·자동vs수정·유속분포·촬영조건·입력이력·데이터사전·파일정보 (python/pipeflow_export.py)
+     * csv = true 면 같은 내용의 시트별 CSV 폴더도 만들어 Pair 의 두 번째로 돌려줌. 실패하면 예외
+     */
+    fun buildExcel(ctx: Context, dirs: List<File>, csv: Boolean = false): Pair<File, File?> {
+        val outDir = exportsDir(ctx)
+        val ts = stamp()
+        val xlsx = File(outDir, "pipeflow_${dirs.size}sessions_${ts}.xlsx")
+        val csvDir = if (csv) File(outDir, "csv_$ts").apply { mkdirs() } else null
+        val r = PyBridge.exportXlsx(ctx, dirs, xlsx, csvDir)
+        if (!r.optBoolean("ok")) throw RuntimeException(r.optString("error", "엑셀 만들기 실패"))
+        return xlsx to csvDir
+    }
+
+    /** 세션 폴더 하나를 zip 으로 (공유용, 엑셀·CSV 포함) */
     fun zip(ctx: Context, dir: File): File = zipMany(ctx, listOf(dir), "pipeflow_${id(dir)}.zip") { _, _ -> }
 
     /**
      * 여러 세션 폴더를 zip 하나로 묶어 cache/exports 에 저장 (공유용). zip 안 구조: <날짜>/<시각_v버전>/<파일> (앱 저장 구조 그대로)
-     * 1시간 지난 예전 내보내기 파일은 정리. onProgress(완료 세션 수, 전체)
+     * + 맨 위에 measurements.xlsx 와 csv/<시트>.csv (엑셀을 못 만들면 원본만). onProgress(완료 세션 수, 전체)
      */
     fun zipMany(ctx: Context, dirs: List<File>, name: String? = null, onProgress: (Int, Int) -> Unit): File {
-        val outDir = File(ctx.cacheDir, "exports").apply { mkdirs() }
-        val now = System.currentTimeMillis()
-        outDir.listFiles()?.filter { now - it.lastModified() > 3_600_000L }?.forEach { it.delete() }
-        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val outDir = exportsDir(ctx)
+        val ts = stamp()
         val out = File(outDir, name ?: "pipeflow_${dirs.size}sessions_${ts}_v${safe(BuildConfig.VERSION_NAME)}.zip")
+        val excel = runCatching { buildExcel(ctx, dirs, csv = true) }.getOrNull()
         ZipOutputStream(FileOutputStream(out)).use { zos ->
             zos.setLevel(1)   // 원본 영상(.y)이 커서 빠른 압축
+            fun put(entry: String, f: File) {
+                zos.putNextEntry(ZipEntry(entry))
+                FileInputStream(f).use { it.copyTo(zos, 1 shl 16) }
+                zos.closeEntry()
+            }
+            excel?.let { (xlsx, csvDir) ->
+                put("measurements.xlsx", xlsx)
+                csvDir?.listFiles()?.sortedBy { it.name }?.forEach { put("csv/${it.name}", it) }
+            }
             dirs.forEachIndexed { i, dir ->
-                dir.listFiles()?.filter { it.isFile && !it.name.startsWith(".") }?.forEach { f ->
+                dir.listFiles()?.filter { it.isFile && (!it.name.startsWith(".") || it.name == PENDING) }?.forEach { f ->
                     zos.putNextEntry(ZipEntry("${rel(ctx, dir)}/${f.name}"))
                     FileInputStream(f).use { it.copyTo(zos, 1 shl 16) }
                     zos.closeEntry()

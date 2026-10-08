@@ -189,7 +189,9 @@ def main():
             depth_mm=Fn["depth"], method=lv.get("method"), rim_source=lv.get("rim_source"), inner_source=lv.get("inner_source"),
             v_surface_mps=Fn["v"], fps=(fin.get("velocity_stiv") or {}).get("fps"),
             f_px=(meta.get("intrinsics") or {}).get("f_px"), zoom_ratio=meta.get("zoom_ratio"), device=meta.get("device", ""),
-            gravity=json.dumps(meta.get("gravity"))))
+            gravity=json.dumps(meta.get("gravity")),
+            lat=(meta.get("location") or {}).get("lat"), lon=(meta.get("location") or {}).get("lon"),
+            place=ann.get("place", "")))
     if rows:
         with open(os.path.join(a.out, "index.csv"), "w", newline="", encoding="utf-8-sig") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
