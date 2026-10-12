@@ -2,108 +2,74 @@ package io.github.ercadion.pipeflow
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.Menu
-import android.view.MenuItem
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.Spinner
+import android.view.LayoutInflater
+import android.view.View
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import com.google.android.material.textfield.TextInputEditText
 import java.io.File
-import java.util.Locale
 
+/**
+ * 홈 탭: 소개, 멈춘 정기 기록(이어서 기록), 최근 측정 3건, 빠른 시작(측정 · 정기 기록)
+ * 하단 탭: 홈 · 측정(MeasureActivity) · 기록(DataActivity) · 설정(SettingsActivity)
+ */
 class MainActivity : AppCompatActivity() {
-    private lateinit var editD: TextInputEditText
-    private lateinit var editSlope: TextInputEditText
-    private lateinit var spinMat: Spinner
-    private lateinit var spinTex: Spinner
-    private lateinit var spinFps: Spinner
-    private lateinit var spinDur: Spinner
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        editD = findViewById(R.id.editDiameter)
-        editSlope = findViewById(R.id.editSlope)
-        spinMat = findViewById(R.id.spinMaterial)
-        spinTex = findViewById(R.id.spinTexture)
-        spinFps = findViewById(R.id.spinFps)
-        spinDur = findViewById(R.id.spinDuration)
-
-        fun adapter(items: List<String>) =
-            ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
-        spinMat.adapter = adapter(Settings.MATERIALS.map { it.second })
-        spinTex.adapter = adapter(Settings.TEXTURES.map { it.second })
-        spinFps.adapter = adapter(Settings.FPS.map { "목표 $it fps (기기가 지원하지 않으면 낮춤)" })
-        spinDur.adapter = adapter(Settings.DURATIONS.map { "촬영 ${it.toInt()}초 (느린 흐름은 길게)" })
-
-        val s = Settings.load(this)
-        editD.setText(fmt(s.diameterMm))
-        editSlope.setText(s.slopePercent?.let { fmt(it) } ?: "")
-        spinMat.setSelection(Settings.MATERIALS.indexOfFirst { it.first == s.material }.coerceAtLeast(0))
-        spinTex.setSelection(Settings.TEXTURES.indexOfFirst { it.first == s.textureSign }.coerceAtLeast(0))
-        spinFps.setSelection(Settings.FPS.indexOf(s.fps).coerceAtLeast(0))
-        spinDur.setSelection(Settings.DURATIONS.indexOf(s.durationSec).coerceAtLeast(0))
-
-        findViewById<Button>(R.id.btnStart).setOnClickListener {
-            val st = readForm() ?: return@setOnClickListener
-            st.save(this)
-            startActivity(Intent(this, CaptureActivity::class.java))
-        }
-        findViewById<Button>(R.id.btnMonitor).setOnClickListener {
-            val st = readForm() ?: return@setOnClickListener
-            st.save(this)
-            startActivity(Intent(this, MonitorActivity::class.java))
-        }
-        findViewById<Button>(R.id.btnHistory).setOnClickListener { openData() }
-        findViewById<TextView>(R.id.txtInfo).text =
-            "버전 ${BuildConfig.VERSION_NAME} · 측정 데이터 저장 위치: ${SessionStore.root(this).absolutePath}"
+        NavBar.setup(this, R.id.nav_home)
+        findViewById<View>(R.id.txtAll).setOnClickListener { startActivity(Intent(this, DataActivity::class.java)) }
+        findViewById<View>(R.id.tileMeasure).setOnClickListener { startActivity(Intent(this, MeasureActivity::class.java)) }
+        findViewById<View>(R.id.tileMonitor).setOnClickListener { startActivity(Intent(this, MonitorActivity::class.java)) }
+        findViewById<TextView>(R.id.txtInfo).text = "버전 ${BuildConfig.VERSION_NAME} (${BuildConfig.GIT_SHA})"
     }
 
     override fun onResume() {
         super.onResume()
-        // 정기 기록 중에 앱이 꺼졌으면 이어서 할지 묻기
-        val d = SessionStore.runningMonitor(this) ?: return
-        if (askedResume == d.absolutePath) return
-        askedResume = d.absolutePath
-        AlertDialog.Builder(this)
-            .setTitle("정기 기록이 멈춰 있습니다")
-            .setMessage("${SessionStore.id(d)}\n앱이 꺼져 기록이 멈췄습니다. 이어서 기록할까요? (멈춘 동안의 시각은 '기록 못 함' 으로 남습니다)")
-            .setPositiveButton("이어서 기록") { _, _ ->
-                startActivity(Intent(this, MonitorActivity::class.java).putExtra(MonitorActivity.EXTRA_DIR, d.absolutePath))
+        NavBar.setup(this, R.id.nav_home)        // 다른 탭에서 돌아왔을 때 홈 표시
+        showRunning()
+        showRecent()
+    }
+
+    /** 앱이 꺼져 멈춘 정기 기록 → 눌러서 이어서 기록 */
+    private fun showRunning() {
+        val box = findViewById<View>(R.id.boxRunning)
+        val d = SessionStore.runningMonitor(this)
+        if (d == null) { box.visibility = View.GONE; return }
+        val m = SessionStore.readJson(File(d, SessionStore.MONITOR))
+        findViewById<TextView>(R.id.txtRunning).text =
+            "정기 기록이 멈춰 있습니다 · ${m?.optString("place")} / ${m?.optString("pipe_id")}\n눌러서 이어서 기록 (멈춘 동안은 '기록 못 함' 으로 남음)"
+        box.visibility = View.VISIBLE
+        box.setOnClickListener {
+            startActivity(Intent(this, MonitorActivity::class.java).putExtra(MonitorActivity.EXTRA_DIR, d.absolutePath))
+        }
+    }
+
+    /** 최근 측정 3건 (카드 누르면 결과 / 정기 기록 보기) */
+    private fun showRecent() {
+        val box = findViewById<LinearLayout>(R.id.recentList)
+        box.removeAllViews()
+        val recent = SessionStore.list(this).take(3)
+        findViewById<View>(R.id.txtEmpty).visibility = if (recent.isEmpty()) View.VISIBLE else View.GONE
+        val inf = LayoutInflater.from(this)
+        for (d in recent) {
+            val s = SessionSummary.of(d)
+            val v = inf.inflate(R.layout.item_recent, box, false)
+            v.findViewById<TextView>(R.id.txtDate).text = s.date
+            v.findViewById<TextView>(R.id.txtTitle).text = s.title
+            v.findViewById<TextView>(R.id.txtLine).text = s.line
+            v.findViewById<TextView>(R.id.txtFlags).apply {
+                text = s.flags.joinToString(" · ")
+                visibility = if (s.flags.isEmpty()) View.GONE else View.VISIBLE
             }
-            .setNegativeButton("나중에", null).show()
+            ThumbCache.load(this, d, v.findViewById<ImageView>(R.id.imgThumb))
+            v.setOnClickListener {
+                if (s.monitor) startActivity(Intent(this, MonitorViewActivity::class.java).putExtra(MonitorViewActivity.EXTRA_DIR, d.absolutePath))
+                else startActivity(Intent(this, ResultActivity::class.java).putExtra(ResultActivity.EXTRA_DIR, d.absolutePath))
+            }
+            box.addView(v)
+        }
     }
-
-    private var askedResume: String? = null
-
-    private fun fmt(v: Double) = if (v == v.toLong().toDouble()) v.toLong().toString() else v.toString()
-
-    private fun readForm(): Settings? {
-        val d = editD.text?.toString()?.toDoubleOrNull()
-        if (d == null || d <= 0) { Toast.makeText(this, "관 내경을 입력하세요", Toast.LENGTH_SHORT).show(); return null }
-        return Settings(
-            diameterMm = d,
-            slopePercent = editSlope.text?.toString()?.toDoubleOrNull(),
-            material = Settings.MATERIALS[spinMat.selectedItemPosition].first,
-            textureSign = Settings.TEXTURES[spinTex.selectedItemPosition].first,
-            fps = Settings.FPS[spinFps.selectedItemPosition],
-            durationSec = Settings.DURATIONS[spinDur.selectedItemPosition],
-        )
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.main_menu, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        if (item.itemId == R.id.menu_data) { openData(); return true }
-        return super.onOptionsItemSelected(item)
-    }
-
-    private fun openData() = startActivity(Intent(this, DataActivity::class.java))
 }

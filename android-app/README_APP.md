@@ -171,6 +171,16 @@ Chaquopy 가 PC의 Python 3.10 으로 numpy 를 받아 넣으므로 Python 3.10 
 - 계산: `python/pipeflow_monitor.py` (calibrate: 관 내경 찾기, measure: 고정 테두리로 수심)
 - 일반 측정 촬영 화면: 탭 초점 범위를 화면의 6%로 좁힘, 관 찾기 범위도 짧은 변의 45% → 25%, **초점 해제** 버튼 추가 (기존 길게 누르기도 됨)
 
+### 화면 디자인 (밝은 파랑 테마)
+- 색·모양: 연한 회청색 바탕(#F3F6FB) + 흰 카드(모서리 16dp, 연한 테두리) + 파랑 강조(#2F6FED), 버튼 모서리 12dp — `res/values/colors.xml`, `themes.xml`(PipeFlow.Card · Note · Section · Label · BigValue)
+- 하단 탭 **홈 · 측정 · 기록 · 설정** (`NavBar.kt`, `view_bottom_nav.xml`)
+  - 홈(MainActivity): 소개, 멈춘 정기 기록 이어서 하기, 최근 측정 3건(사진 카드), 빠른 시작(측정 · 정기 기록)
+  - 측정(MeasureActivity): 관 정보·촬영 설정 카드 → 촬영해서 측정 / 정기 기록
+  - 기록(DataActivity): 전체 · 측정 · 정기 기록 탭, 사진 카드 목록(`ThumbCache` 가 작은 사진을 cache/thumbs 에 저장), 선택 삭제·엑셀·zip
+  - 설정(SettingsActivity): 앱 버전, 데이터 용량·위치, 임시 파일 정리, 권한 상태, 측정·정기 기록 가이드
+- 측정 결과: 사진 카드 → 요약 카드(수위 큰 숫자 + 내경 대비, 관 단면 그림 `PipeSectionView`, 표면·평균 유속, 유량) → 저장 전 확인 → 장소 → 실측값 → 자세히
+- 시안에 있던 갤러리 불러오기·PDF 리포트·체스판 캘리브레이션·알림은 기능이 없어 넣지 않음
+
 ## 데이터 → 신경망 (다음 단계)
 모든 측정은 `Android/data/io.github.ercadion.pipeflow/files/sessions/` 에 세션 폴더로 남고, zip 으로 내보낼 수 있습니다.
 ```

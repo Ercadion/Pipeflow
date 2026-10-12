@@ -366,6 +366,7 @@ class ResultActivity : AppCompatActivity() {
         if (m == null) {
             img.ellipse = null; img.waterline = null; img.autoWaterline = null; img.autoEllipse = null
             txtResult.text = if (running) "" else "분석 결과가 없습니다"
+            fillSummary(null)
             return
         }
         setOverlay(if (m.optBoolean("ok")) m else null)
@@ -386,11 +387,41 @@ class ResultActivity : AppCompatActivity() {
             corr != null -> "자동 결과 — 초록: 관 내경 · 빨강: 수면선 (선을 누르면 수치 표시)"
             else -> "초록: 관 내경 · 빨강: 수면선 (선을 누르면 수치 표시)"
         }
+        fillSummary(if (m.optBoolean("ok")) m else null)
         txtResult.text = when {
             !m.optBoolean("ok") -> "분석 실패\n${m.optString("error")}\n\n${m.optString("traceback")}"
             both && auto != null -> compareText(auto!!, corr!!)
             else -> detailText(m)
         }
+    }
+
+    /** 요약 카드: 수심·충만율·단면 그림·표면/평균 유속·유량 (고친 측정이면 보고 있는 결과 기준) */
+    private fun fillSummary(r: JSONObject?) {
+        val box = findViewById<View>(R.id.boxSummary)
+        val lv = lvOf(r)
+        if (r == null || lv == null) { box.visibility = View.GONE; return }
+        box.visibility = View.VISIBLE
+        findViewById<TextView>(R.id.txtSummaryTitle).text = when {
+            corr == null -> "측정 결과"
+            r === corr -> "측정 결과 (고친 결과)"
+            else -> "측정 결과 (자동 결과)"
+        }
+        val depth = lv.optDouble("depth_mm"); val dia = lv.optDouble("diameter_mm")
+        findViewById<TextView>(R.id.txtDepth).text = String.format(Locale.US, "%.1f", depth)
+        findViewById<TextView>(R.id.txtFill).text = String.format(Locale.US, "%.0f %%", lv.optDouble("fill_ratio") * 100)
+        findViewById<PipeSectionView>(R.id.section).apply { diameterMm = dia; depthMm = depth }
+        val st = stOf(r)
+        findViewById<View>(R.id.rowVelocity).visibility = if (st != null) View.VISIBLE else View.GONE
+        st?.let {
+            findViewById<TextView>(R.id.txtVs).text = String.format(Locale.US, "%.2f", it.optDouble("v_surface_mps"))
+            findViewById<TextView>(R.id.txtVm).text = String.format(Locale.US, "%.2f", it.optDouble("v_mean_mps"))
+        }
+        val fm = fmOf(r)
+        findViewById<View>(R.id.cardFlow).visibility = if (st != null || fm != null) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.txtQ).text = st?.let { String.format(Locale.US, "%.2f", it.optDouble("Q_Lps")) } ?: "-"
+        findViewById<TextView>(R.id.txtQf).text = fm?.let {
+            String.format(Locale.US, "등류 공식: %.2f L/s (평균유속 %.2f m/s, %s)", it.optDouble("Q_Lps"), it.optDouble("V_mean_mps"), it.optString("regime"))
+        } ?: "등류 공식 유량: 관 경사를 입력하면 계산"
     }
 
     private fun lvOf(r: JSONObject?) = r?.optJSONObject("level")

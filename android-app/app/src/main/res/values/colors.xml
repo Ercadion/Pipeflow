@@ -1,5 +1,16 @@
 <resources>
-    <color name="brand">#1565C0</color>
-    <color name="brand_dark">#0D47A1</color>
+    <!-- PipeFlow 디자인 (밝은 파랑 테마) -->
+    <color name="brand">#2F6FED</color>
+    <color name="brand_dark">#1E56C8</color>
+    <color name="brand_soft">#E8F0FE</color>
+    <color name="water">#4F8DF7</color>
+    <color name="bg">#F3F6FB</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="outline">#E2E8F2</color>
+    <color name="text_primary">#1A2233</color>
+    <color name="text_secondary">#6B7588</color>
+    <color name="ok">#22A06B</color>
+    <color name="warn">#F5A524</color>
+    <color name="danger">#E5484D</color>
     <color name="ic_bg">#0D47A1</color>
 </resources>

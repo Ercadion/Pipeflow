@@ -15,6 +15,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import com.google.android.material.tabs.TabLayout
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -26,9 +27,13 @@ import java.util.concurrent.Executors
  *  - 항목 누르기 → 결과 화면
  */
 class DataActivity : AppCompatActivity() {
-    private class Item(val dir: File, val title: String, val detail: String, val bytes: Long) {
+    private class Item(val dir: File, val s: SessionSummary) {
         var checked = false
+        val bytes get() = s.bytes
     }
+
+    private var all: List<Item> = emptyList()
+    private var tab = 0          // 0 전체 · 1 측정 · 2 정기 기록
 
     private lateinit var list: ListView
     private lateinit var txtSummary: TextView
@@ -52,8 +57,12 @@ class DataActivity : AppCompatActivity() {
             cb.setOnCheckedChangeListener(null)
             cb.isChecked = it.checked
             cb.setOnCheckedChangeListener { _, c -> it.checked = c; updateSummary() }
-            v.findViewById<TextView>(R.id.txtTitle).text = it.title
-            v.findViewById<TextView>(R.id.txtDetail).text = it.detail
+            v.findViewById<TextView>(R.id.txtDate).text = it.s.date
+            v.findViewById<TextView>(R.id.txtTitle).text = it.s.title
+            v.findViewById<TextView>(R.id.txtDetail).text = it.s.line
+            v.findViewById<TextView>(R.id.txtFlags).text =
+                (it.s.flags + String.format(Locale.US, "%.1f MB", it.s.bytes / 1e6)).joinToString(" · ")
+            ThumbCache.load(this@DataActivity, it.dir, v.findViewById(R.id.imgThumb))
             return v
         }
     }
@@ -61,8 +70,15 @@ class DataActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_data)
-        title = "측정 데이터"
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)      // 왼쪽 위 ← 뒤로가기
+        title = "측정 기록"
+        NavBar.setup(this, R.id.nav_data)
+        val tabs = findViewById<TabLayout>(R.id.tabs)
+        listOf("전체", "측정", "정기 기록").forEach { tabs.addTab(tabs.newTab().setText(it)) }
+        tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(t: TabLayout.Tab) { tab = t.position; applyFilter() }
+            override fun onTabUnselected(t: TabLayout.Tab) {}
+            override fun onTabReselected(t: TabLayout.Tab) {}
+        })
         list = findViewById(R.id.list)
         txtSummary = findViewById(R.id.txtSummary)
         btnAll = findViewById(R.id.btnAll)
@@ -94,65 +110,21 @@ class DataActivity : AppCompatActivity() {
         if (!busy) load()
     }
 
-    override fun onSupportNavigateUp(): Boolean { finish(); return true }
-
     override fun onDestroy() {
         super.onDestroy()
         worker.shutdown()
     }
 
     private fun load() {
-        val keep = items.filter { it.checked }.map { it.dir.absolutePath }.toSet()
-        items = SessionStore.list(this).map { describe(it).also { i -> i.checked = i.dir.absolutePath in keep } }
+        val keep = all.filter { it.checked }.map { it.dir.absolutePath }.toSet()
+        all = SessionStore.list(this).map { Item(it, SessionSummary.of(it)).also { i -> i.checked = i.dir.absolutePath in keep } }
+        applyFilter()
+    }
+
+    private fun applyFilter() {
+        items = when (tab) { 1 -> all.filter { !it.s.monitor }; 2 -> all.filter { it.s.monitor }; else -> all }
         adapter.notifyDataSetChanged()
         updateSummary()
-    }
-
-    private fun describe(dir: File): Item {
-        val n = SessionStore.id(dir)      // 날짜_시각_v버전
-        val date = if (n.length >= 15) "${n.substring(0, 4)}-${n.substring(4, 6)}-${n.substring(6, 8)} " +
-            "${n.substring(9, 11)}:${n.substring(11, 13)}:${n.substring(13, 15)}" else n
-        val ver = SessionStore.versionOf(dir)
-        if (SessionStore.isMonitor(dir)) return describeMonitor(dir, date, ver)
-        val auto = SessionStore.autoResult(dir)
-        val corr = SessionStore.correctedResult(dir)
-        val ann = SessionStore.annotations(dir)
-        val r = corr ?: auto
-        val parts = mutableListOf<String>()
-        val lv = r?.optJSONObject("level")
-        val st = r?.optJSONObject("velocity_stiv")
-        if (r == null) parts += "미분석" else if (!r.optBoolean("ok")) parts += "분석 실패"
-        lv?.let {
-            val ad = auto?.optJSONObject("level")?.optDouble("depth_mm")
-            parts += if (corr != null && ad != null)
-                String.format(Locale.US, "수심 %.1f mm (자동 %.1f)", it.optDouble("depth_mm"), ad)
-            else String.format(Locale.US, "수심 %.1f mm", it.optDouble("depth_mm"))
-        }
-        st?.let { parts += String.format(Locale.US, "표면유속 %.3f m/s", it.optDouble("v_surface_mps")) }
-        listOf("place", "pipe_id").map { ann.optString(it) }.filter { it.isNotEmpty() }
-            .takeIf { it.isNotEmpty() }?.let { parts.add(0, it.joinToString(" / ")) }      // 장소 / 관로 ID
-        val flags = mutableListOf<String>()
-        if (SessionStore.isPending(dir)) flags += "저장 전"
-        if (corr != null) flags += "수정됨"
-        if (listOf("truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps").any { ann.has(it) }) flags += "실측값"
-        val bytes = SessionStore.sizeOf(dir)
-        val detail = (parts + flags).joinToString(" · ") + String.format(Locale.US, " · %.1f MB", bytes / 1e6)
-        return Item(dir, date + (ver?.let { "  (v$it)" } ?: ""), detail, bytes)
-    }
-
-    /** 정기 기록: 장소 / 관로 ID · 간격 · 기록 수 · 마지막 수심 · 상태 */
-    private fun describeMonitor(dir: File, date: String, ver: String?): Item {
-        val m = SessionStore.readJson(File(dir, SessionStore.MONITOR))
-        val rows = MonitorLog.read(dir)
-        val ok = rows.filter { it["ok"] == "1" }
-        val parts = mutableListOf("[정기 기록]")
-        m?.let { parts += "${it.optString("place")} / ${it.optString("pipe_id")}"; parts += "${it.optInt("interval_min")}분마다" }
-        parts += "기록 ${rows.size}건 (성공 ${ok.size})"
-        ok.lastOrNull()?.get("depth_mm")?.toDoubleOrNull()?.let { parts += String.format(Locale.US, "마지막 수심 %.1f mm", it) }
-        parts += when (m?.optString("status")) { "running" -> "진행 중"; "finished" -> "끝남"; "stopped" -> "중지함"; else -> "" }
-        val bytes = SessionStore.sizeOf(dir)
-        val detail = parts.filter { it.isNotEmpty() }.joinToString(" · ") + String.format(Locale.US, " · %.1f MB", bytes / 1e6)
-        return Item(dir, date + (ver?.let { "  (v$it)" } ?: ""), detail, bytes)
     }
 
     private fun updateSummary() {

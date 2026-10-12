@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 측정: 관 정보·촬영 설정 → 촬영 / 정기 기록 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:paddingHorizontal="16dp" android:paddingBottom="20dp">
+
+            <LinearLayout style="@style/PipeFlow.Card">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="관 정보" android:textColor="@color/text_primary" android:textSize="15sp"
+                    android:textStyle="bold" />
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp" android:hint="관 내경 (mm)" app:suffixText="mm">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/editDiameter" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:inputType="numberDecimal" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:hint="관 경사 (%) — 등류 공식 유량용, 비우면 생략"
+                    app:suffixText="%">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/editSlope" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:inputType="numberDecimal" />
+                </com.google.android.material.textfield.TextInputLayout>
+                <TextView style="@style/PipeFlow.Label" android:layout_marginTop="12dp"
+                    android:text="관 재질 (Manning 조도계수)" />
+                <Spinner android:id="@+id/spinMaterial" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView style="@style/PipeFlow.Label" android:layout_marginTop="8dp"
+                    android:text="수면 아래쪽 무늬" />
+                <Spinner android:id="@+id/spinTexture" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/PipeFlow.Card">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="촬영 설정" android:textColor="@color/text_primary" android:textSize="15sp"
+                    android:textStyle="bold" />
+                <Spinner android:id="@+id/spinFps" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="6dp" />
+                <Spinner android:id="@+id/spinDuration" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <TextView style="@style/PipeFlow.Note"
+                android:text="※ 정확한 측정을 위해 관 내경을 정확히 입력하세요. 관 두께는 입력하지 않습니다 (앱이 안쪽 테두리를 찾습니다)." />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStart" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="16dp"
+                android:text="촬영해서 측정" app:icon="@drawable/ic_camera" app:iconGravity="textStart" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMonitor" style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="정기 기록 (고정 설치 · 1·5·10분마다 수위)" app:icon="@drawable/ic_timeline"
+                app:iconGravity="textStart" app:iconTint="@color/brand" />
+        </LinearLayout>
+    </ScrollView>
+
+    <include layout="@layout/view_bottom_nav" />
+</LinearLayout>

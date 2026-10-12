@@ -3,24 +3,33 @@
     android:layout_width="match_parent" android:layout_height="match_parent">
     <LinearLayout
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:padding="12dp">
+        android:orientation="vertical" android:paddingHorizontal="16dp" android:paddingBottom="24dp">
 
-        <TextView android:id="@+id/txtSummary" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:textSize="14sp" android:textIsSelectable="true" />
+        <LinearLayout style="@style/PipeFlow.Card" android:layout_marginTop="4dp">
+            <TextView android:id="@+id/txtSummary" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:textColor="@color/text_primary"
+                android:textSize="14sp" android:lineSpacingExtra="2dp" android:textIsSelectable="true" />
+        </LinearLayout>
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="12dp" android:text="수심 변화 (빨간 점: 실패·놓친 기록)" android:textStyle="bold" />
-        <io.github.ercadion.pipeflow.DepthChartView
-            android:id="@+id/chart" android:layout_width="match_parent" android:layout_height="260dp" />
+        <TextView style="@style/PipeFlow.Section" android:text="수심 변화" />
+        <LinearLayout style="@style/PipeFlow.Card">
+            <TextView style="@style/PipeFlow.Label" android:text="빨간 점: 실패·놓친 기록" />
+            <io.github.ercadion.pipeflow.DepthChartView
+                android:id="@+id/chart" android:layout_width="match_parent" android:layout_height="240dp" />
+        </LinearLayout>
 
-        <TextView android:id="@+id/txtImage" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="12dp" android:textStyle="bold" />
-        <io.github.ercadion.pipeflow.OverlayImageView
-            android:id="@+id/imgLast"
-            android:layout_width="match_parent" android:layout_height="320dp"
-            android:background="#111111" android:scaleType="fitCenter" />
+        <TextView style="@style/PipeFlow.Section" android:text="기록 사진" />
+        <TextView android:id="@+id/txtImage" style="@style/PipeFlow.Label"
+            android:layout_width="match_parent" android:layout_marginTop="6dp" />
+        <FrameLayout android:layout_width="match_parent" android:layout_height="320dp"
+            android:layout_marginTop="6dp" android:background="@drawable/bg_thumb">
+            <io.github.ercadion.pipeflow.OverlayImageView
+                android:id="@+id/imgLast"
+                android:layout_width="match_parent" android:layout_height="match_parent"
+                android:scaleType="fitCenter" />
+        </FrameLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:layout_marginTop="8dp" android:orientation="horizontal">
             <Button android:id="@+id/btnPrev" style="?attr/materialButtonOutlinedStyle"
                 android:layout_width="0dp" android:layout_weight="1"
                 android:layout_height="wrap_content" android:text="◀ 이전 사진" />

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 설정: 앱 정보 · 저장 공간 · 권한 · 측정 가이드 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:paddingHorizontal="16dp" android:paddingBottom="20dp">
+
+            <TextView style="@style/PipeFlow.Section" android:layout_marginTop="4dp" android:text="기본 정보" />
+            <LinearLayout style="@style/PipeFlow.Card">
+                <TextView style="@style/PipeFlow.Label" android:text="앱 버전" />
+                <TextView android:id="@+id/txtVersion" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:textColor="@color/text_primary" android:textSize="15sp" />
+                <TextView style="@style/PipeFlow.Label" android:layout_marginTop="12dp" android:text="측정 데이터" />
+                <TextView android:id="@+id/txtStorage" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:textColor="@color/text_primary"
+                    android:textSize="14sp" android:textIsSelectable="true" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnClearCache" style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:text="임시 파일 정리 (내보내기·미리보기 사진)" />
+            </LinearLayout>
+
+            <TextView style="@style/PipeFlow.Section" android:text="권한" />
+            <LinearLayout style="@style/PipeFlow.Card">
+                <TextView android:id="@+id/txtPerm" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:textColor="@color/text_primary" android:textSize="14sp" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnAppSettings" style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:text="휴대폰 앱 설정 열기 (권한 변경)" />
+            </LinearLayout>
+
+            <TextView style="@style/PipeFlow.Section" android:text="측정 가이드" />
+            <LinearLayout style="@style/PipeFlow.Card">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:lineSpacingExtra="3dp" android:textColor="@color/text_primary" android:textSize="13sp"
+                    android:text="• 관보다 위에서 수면을 비스듬히(약 45~75°) 내려다보며 찍습니다.\n• 관 끝단 테두리 전체가 화면 가운데 크게 들어오게 합니다.\n• 촬영하는 3~8초 동안 폰을 움직이지 않습니다 (거치대 권장).\n• 다른 물체를 관으로 잡으면 관 안쪽 가운데를 탭하세요. [초점 해제] 버튼으로 취소합니다.\n• 어두우면 조명을 켜고, 반사가 심하면 각도를 바꿉니다.\n• 자로 잰 수심이나 유량계 값이 있으면 실측값에 입력해 주세요. 정확도를 높이는 데 쓰입니다." />
+            </LinearLayout>
+
+            <TextView style="@style/PipeFlow.Section" android:text="정기 기록 (고정 설치)" />
+            <LinearLayout style="@style/PipeFlow.Card">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:lineSpacingExtra="3dp" android:textColor="@color/text_primary" android:textSize="13sp"
+                    android:text="• 폰을 고정하고 충전기를 연결한 뒤 시작합니다.\n• 기록하는 동안 앱 화면이 켜져 있어야 합니다 (화면은 어둡게 유지됨).\n• 시작 때 찾은 관 테두리를 끝까지 쓰므로, 시작한 뒤에는 폰을 움직이지 마세요.\n• 앱이 꺼지면 홈 화면에서 이어서 기록할 수 있습니다." />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <include layout="@layout/view_bottom_nav" />
+</LinearLayout>

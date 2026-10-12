@@ -1,52 +1,134 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 측정 결과: 사진(관 내경·수면선) · 요약 카드(수심·단면·유속·유량) · 자세히 · 저장 전 확인 · 장소·실측값 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent">
     <LinearLayout
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:padding="12dp">
+        android:orientation="vertical" android:paddingHorizontal="16dp" android:paddingBottom="24dp">
 
-        <io.github.ercadion.pipeflow.OverlayImageView
-            android:id="@+id/imgOverlay"
-            android:layout_width="match_parent" android:layout_height="420dp"
-            android:background="#111111" android:scaleType="fitCenter" />
-
-        <TextView android:id="@+id/txtHint" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:textSize="12sp"
+        <FrameLayout android:layout_width="match_parent" android:layout_height="380dp"
+            android:layout_marginTop="4dp" android:background="@drawable/bg_thumb">
+            <io.github.ercadion.pipeflow.OverlayImageView
+                android:id="@+id/imgOverlay"
+                android:layout_width="match_parent" android:layout_height="match_parent"
+                android:scaleType="fitCenter" />
+        </FrameLayout>
+        <TextView android:id="@+id/txtHint" style="@style/PipeFlow.Label"
+            android:layout_width="match_parent" android:layout_marginTop="6dp"
             android:text="초록: 관 내경 · 빨강: 수면선" />
 
-        <TextView android:id="@+id/txtMode" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="6dp"
-            android:padding="8dp" android:background="#22888888" android:textSize="13sp" />
+        <TextView android:id="@+id/txtMode" style="@style/PipeFlow.Note" />
 
         <RadioGroup android:id="@+id/groupView" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:orientation="horizontal"
-            android:visibility="gone">
+            android:layout_height="wrap_content" android:layout_marginTop="12dp"
+            android:background="@drawable/bg_card" android:padding="4dp"
+            android:orientation="horizontal" android:visibility="gone">
             <RadioButton android:id="@+id/viewAuto" android:layout_width="0dp"
-                android:layout_weight="1" android:layout_height="wrap_content" android:text="자동" />
+                android:layout_weight="1" android:layout_height="40dp" android:button="@null"
+                android:background="@drawable/bg_segment" android:gravity="center"
+                android:textColor="@color/seg_text" android:textStyle="bold" android:text="자동" />
             <RadioButton android:id="@+id/viewCorr" android:layout_width="0dp"
-                android:layout_weight="1" android:layout_height="wrap_content" android:text="수정" />
+                android:layout_weight="1" android:layout_height="40dp" android:button="@null"
+                android:background="@drawable/bg_segment" android:gravity="center"
+                android:textColor="@color/seg_text" android:textStyle="bold" android:text="수정" />
             <RadioButton android:id="@+id/viewBoth" android:layout_width="0dp"
-                android:layout_weight="1" android:layout_height="wrap_content" android:text="비교" />
+                android:layout_weight="1" android:layout_height="40dp" android:button="@null"
+                android:background="@drawable/bg_segment" android:gravity="center"
+                android:textColor="@color/seg_text" android:textStyle="bold" android:text="비교" />
         </RadioGroup>
 
         <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:indeterminate="true" android:visibility="gone" />
-        <TextView android:id="@+id/txtProgress" android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_marginTop="8dp" android:indeterminate="true" android:visibility="gone" />
+        <TextView android:id="@+id/txtProgress" style="@style/PipeFlow.Label"
+            android:layout_width="match_parent" />
 
-        <TextView android:id="@+id/txtResult" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="8dp"
-            android:textIsSelectable="true" android:textSize="15sp" />
+        <!-- 결과 요약 카드 -->
+        <LinearLayout android:id="@+id/boxSummary" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+            <TextView android:id="@+id/txtSummaryTitle" style="@style/PipeFlow.Section" android:text="측정 결과" />
+            <LinearLayout style="@style/PipeFlow.Card" android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <ImageView android:layout_width="40dp" android:layout_height="40dp"
+                    android:background="@drawable/bg_icon_circle" android:padding="9dp"
+                    android:src="@drawable/ic_drop" app:tint="@color/brand" android:contentDescription="수위" />
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:layout_marginStart="12dp" android:orientation="vertical">
+                    <TextView style="@style/PipeFlow.Label" android:text="수위 (Depth)" />
+                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:baselineAligned="true">
+                        <TextView android:id="@+id/txtDepth" style="@style/PipeFlow.BigValue" android:text="-" />
+                        <TextView style="@style/PipeFlow.Label" android:layout_marginStart="4dp"
+                            android:textSize="14sp" android:text="mm" />
+                    </LinearLayout>
+                </LinearLayout>
+                <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:gravity="end">
+                    <TextView style="@style/PipeFlow.Label" android:text="내경 대비" />
+                    <TextView android:id="@+id/txtFill" android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" android:textColor="@color/brand"
+                        android:textSize="18sp" android:textStyle="bold" android:text="-" />
+                </LinearLayout>
+            </LinearLayout>
+            <LinearLayout style="@style/PipeFlow.Card">
+                <io.github.ercadion.pipeflow.PipeSectionView
+                    android:id="@+id/section" android:layout_width="match_parent" android:layout_height="190dp" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/rowVelocity" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="12dp" android:orientation="horizontal">
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:background="@drawable/bg_card"
+                    android:orientation="vertical" android:padding="14dp" >
+                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical">
+                        <ImageView android:layout_width="18dp" android:layout_height="18dp"
+                            android:src="@drawable/ic_speed" app:tint="@color/brand" android:contentDescription="표면 유속" />
+                        <TextView style="@style/PipeFlow.Label" android:layout_marginStart="6dp" android:text="표면 유속" />
+                    </LinearLayout>
+                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:layout_marginTop="4dp" android:baselineAligned="true">
+                        <TextView android:id="@+id/txtVs" style="@style/PipeFlow.BigValue" android:textSize="24sp" android:text="-" />
+                        <TextView style="@style/PipeFlow.Label" android:layout_marginStart="4dp" android:textSize="13sp" android:text="m/s" />
+                    </LinearLayout>
+                </LinearLayout>
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:background="@drawable/bg_card"
+                    android:orientation="vertical" android:padding="14dp" android:layout_marginStart="12dp">
+                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical">
+                        <ImageView android:layout_width="18dp" android:layout_height="18dp"
+                            android:src="@drawable/ic_speed" app:tint="@color/brand" android:contentDescription="평균 유속" />
+                        <TextView style="@style/PipeFlow.Label" android:layout_marginStart="6dp" android:text="평균 유속" />
+                    </LinearLayout>
+                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:layout_marginTop="4dp" android:baselineAligned="true">
+                        <TextView android:id="@+id/txtVm" style="@style/PipeFlow.BigValue" android:textSize="24sp" android:text="-" />
+                        <TextView style="@style/PipeFlow.Label" android:layout_marginStart="4dp" android:textSize="13sp" android:text="m/s" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+            <LinearLayout android:id="@+id/cardFlow" style="@style/PipeFlow.Card">
+                <TextView style="@style/PipeFlow.Label" android:text="유량 (Discharge, 영상)" />
+                <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:baselineAligned="true">
+                    <TextView android:id="@+id/txtQ" style="@style/PipeFlow.BigValue" android:text="-" />
+                    <TextView style="@style/PipeFlow.Label" android:layout_marginStart="4dp"
+                        android:textSize="14sp" android:text="L/s" />
+                </LinearLayout>
+                <TextView android:id="@+id/txtQf" style="@style/PipeFlow.Label" android:layout_width="match_parent" />
+            </LinearLayout>
+        </LinearLayout>
 
         <!-- 저장 전 확인 단계에서만 보임 -->
-        <LinearLayout android:id="@+id/boxReview" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:orientation="vertical"
-            android:layout_marginTop="8dp" android:visibility="gone">
+        <LinearLayout android:id="@+id/boxReview" style="@style/PipeFlow.Card" android:visibility="gone">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="자동 결과가 틀렸으면 고치세요 (자동 결과는 그대로 함께 저장됩니다)" />
+                android:textColor="@color/text_primary" android:textStyle="bold"
+                android:text="자동 결과가 틀렸으면 고치세요" />
+            <TextView style="@style/PipeFlow.Label" android:layout_width="match_parent"
+                android:text="자동 결과는 그대로 함께 저장됩니다" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:layout_marginTop="8dp" android:orientation="horizontal">
                 <Button android:id="@+id/btnEdit" style="?attr/materialButtonOutlinedStyle"
                     android:layout_width="0dp" android:layout_weight="1"
                     android:layout_height="wrap_content" android:text="수면선 수정" />
@@ -60,62 +142,72 @@
                 android:text="고친 것 버리고 자동 결과로" android:visibility="gone" />
         </LinearLayout>
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="측정 장소·관로 ID (필수 — 저장할 때 측정 폴더 이름에 들어가고, 저장 후에는 바꿀 수 없음)" />
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="측정 장소 (예: 서천동 우수관 3번 맨홀) — 다음 측정에 자동으로 채워짐">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editPlace" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" />
-        </com.google.android.material.textfield.TextInputLayout>
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="관로 ID (예: P-012) — 다음 측정에 자동으로 채워짐">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editPipe" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" />
-        </com.google.android.material.textfield.TextInputLayout>
-        <TextView android:id="@+id/txtLocation" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:textSize="12sp" />
+        <TextView style="@style/PipeFlow.Section" android:text="측정 장소" />
+        <LinearLayout style="@style/PipeFlow.Card">
+            <TextView style="@style/PipeFlow.Label" android:layout_width="match_parent"
+                android:text="필수 — 저장할 때 측정 폴더 이름에 들어가고, 저장 후에는 바꿀 수 없음" />
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:hint="측정 장소 (예: 서천동 우수관 3번 맨홀)">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/editPlace" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:hint="관로 ID (예: P-012)">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/editPipe" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <TextView android:id="@+id/txtLocation" style="@style/PipeFlow.Label"
+                android:layout_width="match_parent" android:layout_marginTop="6dp" />
+        </LinearLayout>
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="실측값 (알면 입력 — 저장 후에도 입력 가능, 학습 정답·버전 비교의 기준)" />
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="실측 수심 (mm, 자로 잰 값)">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editTruthDepth" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:inputType="numberDecimal|numberSigned" />
-        </com.google.android.material.textfield.TextInputLayout>
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="실측 평균유속 (m/s, 유량계 등)">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editTruthV" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:inputType="numberDecimal|numberSigned" />
-        </com.google.android.material.textfield.TextInputLayout>
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="실측 유량 (L/s)">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editTruthQ" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:inputType="numberDecimal|numberSigned" />
-        </com.google.android.material.textfield.TextInputLayout>
+        <TextView style="@style/PipeFlow.Section" android:text="실측값 · 메모" />
+        <LinearLayout style="@style/PipeFlow.Card">
+            <TextView style="@style/PipeFlow.Label" android:layout_width="match_parent"
+                android:text="알면 입력 — 저장 후에도 입력 가능, 정확도를 높이는 기준이 됩니다" />
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:hint="실측 수심 (mm, 자로 잰 값)">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/editTruthDepth" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:inputType="numberDecimal|numberSigned" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:hint="실측 평균유속 (m/s, 유량계 등)">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/editTruthV" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:inputType="numberDecimal|numberSigned" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:hint="실측 유량 (L/s)">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/editTruthQ" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:inputType="numberDecimal|numberSigned" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:hint="메모 (예: 자로 잰 수심 42mm, 유량계 0.31 m/s)">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/editNote" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="참값 메모 (예: 자로 잰 수심 42mm, 유량계 0.31 m/s)">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editNote" android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-        </com.google.android.material.textfield.TextInputLayout>
+        <TextView style="@style/PipeFlow.Section" android:text="자세히" />
+        <LinearLayout style="@style/PipeFlow.Card">
+            <TextView android:id="@+id/txtResult" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:textIsSelectable="true"
+                android:textColor="@color/text_primary" android:textSize="13sp" android:lineSpacingExtra="2dp" />
+        </LinearLayout>
 
         <LinearLayout android:id="@+id/boxSave" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:orientation="horizontal"
-            android:layout_marginTop="8dp" android:visibility="gone">
+            android:layout_marginTop="16dp" android:visibility="gone">
             <Button android:id="@+id/btnDiscard" style="?attr/materialButtonOutlinedStyle"
                 android:layout_width="0dp" android:layout_weight="1"
                 android:layout_height="wrap_content" android:text="삭제" />
@@ -123,6 +215,5 @@
                 android:layout_height="wrap_content" android:layout_marginStart="8dp"
                 android:text="저장 (이후 결과 변경 불가)" />
         </LinearLayout>
-
     </LinearLayout>
 </ScrollView>
