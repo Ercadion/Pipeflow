@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- 준비 · 기준 확인 -->
+    <LinearLayout android:id="@+id/boxPrepare"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
+            android:layout_weight="1.1">
+            <androidx.camera.view.PreviewView
+                android:id="@+id/previewView"
+                android:layout_width="match_parent" android:layout_height="match_parent" />
+            <View android:id="@+id/focusMark" android:layout_width="36dp" android:layout_height="36dp"
+                android:background="@drawable/focus_mark" android:visibility="gone" />
+            <io.github.ercadion.pipeflow.OverlayImageView
+                android:id="@+id/imgCalib"
+                android:layout_width="match_parent" android:layout_height="match_parent"
+                android:background="#111111" android:scaleType="fitCenter" android:visibility="gone" />
+            <TextView android:id="@+id/txtTop" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_gravity="top"
+                android:background="#99000000" android:padding="8dp"
+                android:textColor="#FFFFFF" android:textSize="13sp" />
+        </FrameLayout>
+
+        <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
+            android:layout_weight="1" android:background="?android:attr/colorBackground">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:padding="12dp">
+
+                <!-- 준비 단계 -->
+                <LinearLayout android:id="@+id/boxSetup" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:orientation="vertical">
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:hint="측정 장소 (필수)">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/editPlace" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:hint="관로 ID (필수)">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/editPipe" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="text" android:maxLines="1" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:text="기록 기간" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <Button android:id="@+id/btnStartTime" style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:textSize="12sp" />
+                        <Button android:id="@+id/btnEndTime" style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:text="기록 간격" />
+                    <Spinner android:id="@+id/spinInterval" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <CheckBox android:id="@+id/chkTorch" android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="기록할 때만 조명 켜기 (어두운 곳·밤)" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <Button android:id="@+id/btnFocusClear" style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:text="초점 해제"
+                            android:enabled="false" />
+                        <Button android:id="@+id/btnCalib" android:layout_width="0dp" android:layout_weight="2"
+                            android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                            android:text="기준 사진 찍고 관 찾기" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/txtSetupInfo" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- 기준 확인 단계 -->
+                <LinearLayout android:id="@+id/boxCalib" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:orientation="vertical"
+                    android:visibility="gone">
+                    <TextView android:id="@+id/txtCalib" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:textSize="14sp" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:layout_marginTop="8dp">
+                        <Button android:id="@+id/btnRetake" style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:text="다시 찍기" />
+                        <Button android:id="@+id/btnRedetect" style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                            android:text="다시 찾기" />
+                    </LinearLayout>
+                    <Button android:id="@+id/btnBegin" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:text="이 테두리로 정기 기록 시작" />
+                </LinearLayout>
+
+                <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:indeterminate="true" android:visibility="gone" />
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- 기록 중 (화면 어둡게, 카메라는 아래에서 계속 동작) -->
+    <LinearLayout android:id="@+id/boxRun"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:background="#000000" android:orientation="vertical" android:padding="20dp"
+        android:visibility="gone">
+        <TextView android:id="@+id/txtRunTitle" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textColor="#FFFFFF"
+            android:textSize="18sp" android:textStyle="bold" />
+        <TextView android:id="@+id/txtRun" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="8dp"
+            android:textColor="#DDDDDD" android:textSize="14sp" />
+        <io.github.ercadion.pipeflow.DepthChartView
+            android:id="@+id/chart" android:layout_width="match_parent"
+            android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="12dp" />
+        <TextView android:id="@+id/txtRunHint" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textColor="#888888" android:textSize="12sp"
+            android:text="화면을 누르면 잠시 밝아집니다. 앱을 나가거나 화면을 끄면 기록이 멈춥니다." />
+        <Button android:id="@+id/btnStop" style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:textColor="#FFFFFF" android:text="정기 기록 중지" />
+    </LinearLayout>
+</FrameLayout>

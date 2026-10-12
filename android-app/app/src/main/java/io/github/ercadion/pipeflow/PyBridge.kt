@@ -34,4 +34,19 @@ object PyBridge {
             "PipeFlow 앱 v${BuildConfig.VERSION_NAME} (${BuildConfig.GIT_SHA})", csvDir?.absolutePath ?: "", tz)
         return JSONObject(res.toString())
     }
+
+    /** 정기 기록: 기준 사진에서 관 내경 테두리 찾기 (pipeflow_monitor.calibrate). 백그라운드 스레드에서 */
+    fun monitorCalibrate(ctx: Context, y: File, w: Int, h: Int, rot: Int, params: JSONObject): JSONObject {
+        ensureStarted(ctx)
+        val mod = Python.getInstance().getModule("pipeflow_monitor")
+        return JSONObject(mod.callAttr("calibrate", y.absolutePath, w, h, rot, params.toString()).toString())
+    }
+
+    /** 정기 기록: 고정한 테두리로 수심 계산 (pipeflow_monitor.measure). 백그라운드 스레드에서 */
+    fun monitorMeasure(ctx: Context, ys: List<File>, w: Int, h: Int, rot: Int, params: JSONObject): JSONObject {
+        ensureStarted(ctx)
+        val mod = Python.getInstance().getModule("pipeflow_monitor")
+        val paths = org.json.JSONArray(ys.map { it.absolutePath }).toString()
+        return JSONObject(mod.callAttr("measure", paths, w, h, rot, params.toString()).toString())
+    }
 }

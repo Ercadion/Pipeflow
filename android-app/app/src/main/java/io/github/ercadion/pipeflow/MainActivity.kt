@@ -53,10 +53,32 @@ class MainActivity : AppCompatActivity() {
             st.save(this)
             startActivity(Intent(this, CaptureActivity::class.java))
         }
+        findViewById<Button>(R.id.btnMonitor).setOnClickListener {
+            val st = readForm() ?: return@setOnClickListener
+            st.save(this)
+            startActivity(Intent(this, MonitorActivity::class.java))
+        }
         findViewById<Button>(R.id.btnHistory).setOnClickListener { openData() }
         findViewById<TextView>(R.id.txtInfo).text =
             "버전 ${BuildConfig.VERSION_NAME} · 측정 데이터 저장 위치: ${SessionStore.root(this).absolutePath}"
     }
+
+    override fun onResume() {
+        super.onResume()
+        // 정기 기록 중에 앱이 꺼졌으면 이어서 할지 묻기
+        val d = SessionStore.runningMonitor(this) ?: return
+        if (askedResume == d.absolutePath) return
+        askedResume = d.absolutePath
+        AlertDialog.Builder(this)
+            .setTitle("정기 기록이 멈춰 있습니다")
+            .setMessage("${SessionStore.id(d)}\n앱이 꺼져 기록이 멈췄습니다. 이어서 기록할까요? (멈춘 동안의 시각은 '기록 못 함' 으로 남습니다)")
+            .setPositiveButton("이어서 기록") { _, _ ->
+                startActivity(Intent(this, MonitorActivity::class.java).putExtra(MonitorActivity.EXTRA_DIR, d.absolutePath))
+            }
+            .setNegativeButton("나중에", null).show()
+    }
+
+    private var askedResume: String? = null
 
     private fun fmt(v: Double) = if (v == v.toLong().toDouble()) v.toLong().toString() else v.toString()
 

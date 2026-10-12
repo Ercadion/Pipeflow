@@ -73,7 +73,11 @@ class DataActivity : AppCompatActivity() {
         progress.visibility = View.GONE
         list.adapter = adapter
         list.setOnItemClickListener { _, _, p, _ ->
-            startActivity(Intent(this, ResultActivity::class.java).putExtra(ResultActivity.EXTRA_DIR, items[p].dir.absolutePath))
+            val d = items[p].dir
+            if (SessionStore.isMonitor(d))
+                startActivity(Intent(this, MonitorViewActivity::class.java).putExtra(MonitorViewActivity.EXTRA_DIR, d.absolutePath))
+            else
+                startActivity(Intent(this, ResultActivity::class.java).putExtra(ResultActivity.EXTRA_DIR, d.absolutePath))
         }
         btnAll.setOnClickListener {
             val all = items.isNotEmpty() && items.all { it.checked }
@@ -109,6 +113,7 @@ class DataActivity : AppCompatActivity() {
         val date = if (n.length >= 15) "${n.substring(0, 4)}-${n.substring(4, 6)}-${n.substring(6, 8)} " +
             "${n.substring(9, 11)}:${n.substring(11, 13)}:${n.substring(13, 15)}" else n
         val ver = SessionStore.versionOf(dir)
+        if (SessionStore.isMonitor(dir)) return describeMonitor(dir, date, ver)
         val auto = SessionStore.autoResult(dir)
         val corr = SessionStore.correctedResult(dir)
         val ann = SessionStore.annotations(dir)
@@ -132,6 +137,21 @@ class DataActivity : AppCompatActivity() {
         if (listOf("truth_depth_mm", "truth_v_mean_mps", "truth_Q_Lps").any { ann.has(it) }) flags += "실측값"
         val bytes = SessionStore.sizeOf(dir)
         val detail = (parts + flags).joinToString(" · ") + String.format(Locale.US, " · %.1f MB", bytes / 1e6)
+        return Item(dir, date + (ver?.let { "  (v$it)" } ?: ""), detail, bytes)
+    }
+
+    /** 정기 기록: 장소 / 관로 ID · 간격 · 기록 수 · 마지막 수심 · 상태 */
+    private fun describeMonitor(dir: File, date: String, ver: String?): Item {
+        val m = SessionStore.readJson(File(dir, SessionStore.MONITOR))
+        val rows = MonitorLog.read(dir)
+        val ok = rows.filter { it["ok"] == "1" }
+        val parts = mutableListOf("[정기 기록]")
+        m?.let { parts += "${it.optString("place")} / ${it.optString("pipe_id")}"; parts += "${it.optInt("interval_min")}분마다" }
+        parts += "기록 ${rows.size}건 (성공 ${ok.size})"
+        ok.lastOrNull()?.get("depth_mm")?.toDoubleOrNull()?.let { parts += String.format(Locale.US, "마지막 수심 %.1f mm", it) }
+        parts += when (m?.optString("status")) { "running" -> "진행 중"; "finished" -> "끝남"; "stopped" -> "중지함"; else -> "" }
+        val bytes = SessionStore.sizeOf(dir)
+        val detail = parts.filter { it.isNotEmpty() }.joinToString(" · ") + String.format(Locale.US, " · %.1f MB", bytes / 1e6)
         return Item(dir, date + (ver?.let { "  (v$it)" } ?: ""), detail, bytes)
     }
 

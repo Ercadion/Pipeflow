@@ -47,6 +47,9 @@
         <Button android:id="@+id/btnStart" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:layout_marginTop="20dp"
             android:text="측정 시작 (촬영)" />
+        <Button android:id="@+id/btnMonitor" style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="정기 기록 (고정 설치 · 1·5·10분마다 수위)" />
         <Button android:id="@+id/btnHistory" style="?attr/materialButtonOutlinedStyle"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="측정 데이터 (보기·내보내기·삭제)" />

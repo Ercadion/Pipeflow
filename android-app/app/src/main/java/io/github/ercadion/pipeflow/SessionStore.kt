@@ -44,7 +44,32 @@ object SessionStore {
         return dir.apply { mkdirs() }
     }
 
-    private fun isSession(f: File) = f.isDirectory && File(f, "meta.json").exists()
+    private fun isSession(f: File) = f.isDirectory && (File(f, "meta.json").exists() || File(f, MONITOR).exists())
+
+    // ------------------------------------------------------------------ 정기 기록 (고정 설치)
+    const val MONITOR = "monitor.json"
+    const val RECORDS = "records.csv"
+
+    /** 정기 기록 폴더인지 (monitor.json 이 있음) */
+    fun isMonitor(dir: File) = File(dir, MONITOR).exists()
+
+    /** 정기 기록 폴더: sessions/<날짜>/<시각>_<장소>_<관로ID>_정기_v<버전>/ */
+    fun newMonitor(ctx: Context, place: String, pipe: String): File {
+        val now = Date()
+        val day = SimpleDateFormat("yyyyMMdd", Locale.US).format(now)
+        val time = SimpleDateFormat("HHmmss", Locale.US).format(now)
+        val dayDir = File(root(ctx), day)
+        val base = "${time}_${nameSafe(place)}_${nameSafe(pipe)}_정기_v${safe(BuildConfig.VERSION_NAME)}"
+        var dir = File(dayDir, base)
+        var k = 2
+        while (dir.exists()) dir = File(dayDir, "${base}_$k").also { k++ }
+        return dir.apply { mkdirs() }
+    }
+
+    /** 진행 중이던 정기 기록 (상태 running, 끝 시각 전) — 앱이 꺼졌다 다시 켜졌을 때 이어서 하기 */
+    fun runningMonitor(ctx: Context): File? = list(ctx).firstOrNull { d ->
+        isMonitor(d) && readJson(File(d, MONITOR))?.let { it.optString("status") == "running" && it.optLong("end_ms") > System.currentTimeMillis() } == true
+    }
 
     /** 모든 측정 (날짜 폴더 안 + 예전 형식), 최근 것부터 */
     fun list(ctx: Context): List<File> {
@@ -265,10 +290,9 @@ object SessionStore {
             }
             excel?.let { put("measurements.xlsx", it) }
             dirs.forEachIndexed { i, dir ->
-                dir.listFiles()?.filter { it.isFile && (!it.name.startsWith(".") || it.name == PENDING) }?.forEach { f ->
-                    zos.putNextEntry(ZipEntry("${rel(ctx, dir)}/${f.name}"))
-                    FileInputStream(f).use { it.copyTo(zos, 1 shl 16) }
-                    zos.closeEntry()
+                // 하위 폴더(정기 기록의 img/)까지, 숨김 파일은 저장 전 표시만
+                dir.walkTopDown().filter { it.isFile && (!it.name.startsWith(".") || it.name == PENDING) }.sortedBy { it.path }.forEach { f ->
+                    put("${rel(ctx, dir)}/${f.relativeTo(dir).path.replace(File.separatorChar, '/')}", f)
                 }
                 onProgress(i + 1, dirs.size)
             }

@@ -75,6 +75,7 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var txtStatus: TextView
     private lateinit var btnRecord: Button
     private lateinit var btnTorch: Button
+    private lateinit var btnFocusClear: Button
     private lateinit var executor: ExecutorService
     private lateinit var settings: Settings
     private var camera: Camera? = null
@@ -154,6 +155,8 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         btnRecord.setOnClickListener { startRecording() }
         btnTorch.setOnClickListener { setTorch(!torchOn) }
+        btnFocusClear = findViewById(R.id.btnFocusClear)
+        btnFocusClear.setOnClickListener { clearRoi(true) }
         setupGestures()
         locTracker = LocationTracker(this)
         val camOk = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -318,16 +321,17 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    /** 탭: 그 위치에 초점·노출 맞춤 + 주변(짧은 변의 45%)을 관 검사 범위로 */
+    /** 탭: 그 위치의 좁은 범위(화면의 6%)에 초점·노출 맞춤 + 주변(짧은 변의 25%)을 관 검사 범위로 */
     private fun tapFocus(vx: Float, vy: Float) {
         val cam = camera ?: return
-        val pt = previewView.meteringPointFactory.createPoint(vx, vy)
+        val pt = previewView.meteringPointFactory.createPoint(vx, vy, 0.06f)
         val action = FocusMeteringAction.Builder(pt, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
             .disableAutoCancel().build()
         cam.cameraControl.startFocusAndMetering(action)
         val p = viewToSensor(vx.toDouble(), vy.toDouble()) ?: return
-        setRoi(doubleArrayOf(p[0], p[1], 0.45 * min(mapW, mapH)))
-        Toast.makeText(this, "초점 맞춤 · 터치한 주변에서 관을 찾습니다 (길게 누르면 해제)", Toast.LENGTH_SHORT).show()
+        setRoi(doubleArrayOf(p[0], p[1], 0.25 * min(mapW, mapH)))
+        btnFocusClear.visibility = View.VISIBLE
+        Toast.makeText(this, "초점 맞춤 · 터치한 주변에서 관을 찾습니다 ('초점 해제' 또는 길게 눌러 취소)", Toast.LENGTH_SHORT).show()
     }
 
     private fun setRoi(r: DoubleArray) { roi = r; roiVersion++ }
@@ -336,6 +340,7 @@ class CaptureActivity : AppCompatActivity(), SensorEventListener {
         if (roi == null && !cancelFocus) return
         roi = null; roiVersion++
         guide.roi = null
+        btnFocusClear.visibility = View.GONE
         if (cancelFocus) {
             camera?.cameraControl?.cancelFocusAndMetering()
             Toast.makeText(this, "검사 범위 해제 · 자동 초점", Toast.LENGTH_SHORT).show()

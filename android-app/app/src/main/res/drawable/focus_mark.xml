@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 탭한 초점 위치 표시 (노란 원) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <stroke android:width="2dp" android:color="#FFD600" />
+    <solid android:color="#00000000" />
+</shape>

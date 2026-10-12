@@ -9,7 +9,10 @@
   ④ 촬영조건     1행 = 측정 1건 (기기·해상도·카메라 기울기·검출 방식·무결성)
   ⑤ 입력이력     1행 = 장소·실측값·메모 입력 1회
   ⑥ 데이터사전   1행 = 열 1개 (설명·단위·영문 키·추가된 양식 버전)
-  ⑦ 파일정보     양식 버전·생성 시각·측정 건수·기간
+  ⑦ 정기기록목록 1행 = 정기 기록(고정 설치) 1건: 장소·관로ID·기간·간격·기록 수   (양식 1.1~)
+  ⑧ 정기기록     1행 = 기록 시각 1번: 시각·수심·충만율·신뢰도 (실패·놓친 시각은 수심 빈칸)
+  ⑨ 정기기록그래프 정기 기록마다 시간→수심 그래프
+  ⑩ 데이터사전 · ⑪ 파일정보
 
 확장 규칙 (회사 쪽 피벗·수식·연결이 깨지지 않게)
   - 열 이름·순서는 바꾸지 않음. 새 항목은 각 시트 '맨 뒤'에 열 추가 + COLUMNS 의 added 에 양식 버전 기록
@@ -26,7 +29,7 @@ import re
 
 from pipeflow_records import read_session, waterline
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"   # 1.1: 정기 기록 시트 추가
 
 # (영문 키, 열 이름, 단위, 숫자 서식, 설명, 추가된 양식 버전)
 SUMMARY = [
@@ -106,11 +109,50 @@ HISTORY = [
     ("app_version", "앱 버전", "", "@", "입력할 때의 앱 버전", "1.0"),
 ]
 
+MONITORS = [
+    ("id", "기록ID", "", "@", "정기 기록 이름 = 날짜_시각_장소_관로ID_정기_v앱버전. 정기기록 시트와 연결", "1.1"),
+    ("place", "장소명", "", "@", "측정 장소", "1.1"),
+    ("pipe_id", "관로ID", "", "@", "관로 식별 번호", "1.1"),
+    ("lat", "위도", "°", "0.000000", "설치 위치 위도 (GPS, 없으면 빈칸)", "1.1"),
+    ("lon", "경도", "°", "0.000000", "설치 위치 경도", "1.1"),
+    ("start", "시작", "", "yyyy-mm-dd hh:mm", "기록 시작 (설정)", "1.1"),
+    ("end", "끝", "", "yyyy-mm-dd hh:mm", "기록 끝 (설정)", "1.1"),
+    ("interval", "간격", "분", "0", "기록 간격", "1.1"),
+    ("n", "기록 수", "", "0", "기록 시각 수 (실패·놓침 포함)", "1.1"),
+    ("n_ok", "성공 수", "", "0", "수심을 계산한 기록 수", "1.1"),
+    ("status", "상태", "", "@", "진행 중 / 끝남 / 중지함", "1.1"),
+    ("diameter_mm", "내경", "mm", "0", "관 내경 (설정값)", "1.1"),
+    ("calib_depth", "기준 수심", "mm", "0.0", "시작할 때 기준 사진의 수심", "1.1"),
+    ("depth_min", "최소 수심", "mm", "0.0", "", "1.1"),
+    ("depth_max", "최대 수심", "mm", "0.0", "", "1.1"),
+    ("depth_mean", "평균 수심", "mm", "0.0", "", "1.1"),
+    ("app_version", "앱 버전", "", "@", "", "1.1"),
+    ("folder", "폴더", "", "@", "zip·앱 저장소 안의 폴더 (사진: 폴더/img)", "1.1"),
+]
+
+MONITOR_RECS = [
+    ("id", "기록ID", "", "@", "정기기록목록의 기록ID", "1.1"),
+    ("t", "시각", "", "yyyy-mm-dd hh:mm", "기록 시각 (폰 시간)", "1.1"),
+    ("place", "장소명", "", "@", "", "1.1"),
+    ("pipe_id", "관로ID", "", "@", "", "1.1"),
+    ("ok", "성공", "", "@", "예 = 수심 계산함 / 아니오 = 실패·놓침 (비고 참고)", "1.1"),
+    ("depth_mm", "수심", "mm", "0.0", "고정한 관 내경 테두리로 계산한 수심 (사진 5장 평균 영상)", "1.1"),
+    ("fill_pct", "충만율", "%", "0.0", "수심 ÷ 내경", "1.1"),
+    ("conf", "수면선 신뢰도", "", "0.00", "0~1, 낮으면 사진 확인", "1.1"),
+    ("brightness", "밝기", "", "0", "사진 평균 밝기 (0~255)", "1.1"),
+    ("torch", "조명", "", "@", "기록할 때 조명을 켰는지", "1.1"),
+    ("battery", "배터리", "%", "0", "", "1.1"),
+    ("charging", "충전", "", "@", "", "1.1"),
+    ("image", "사진", "", "@", "폴더 안 사진 경로", "1.1"),
+    ("note", "비고", "", "@", "실패 이유·경고", "1.1"),
+]
+
 TABLE_NAMES = {"측정요약": "tbl_summary", "자동vs수정": "tbl_compare", "유속분포": "tbl_profile",
+               "정기기록목록": "tbl_monitor", "정기기록": "tbl_monitor_records",
                "촬영조건": "tbl_capture", "입력이력": "tbl_history"}
 
 SHEETS = [("측정요약", SUMMARY), ("자동vs수정", COMPARE), ("유속분포", PROFILE),
-          ("촬영조건", CAPTURE), ("입력이력", HISTORY)]
+          ("촬영조건", CAPTURE), ("입력이력", HISTORY), ("정기기록목록", MONITORS), ("정기기록", MONITOR_RECS)]
 
 FIELD_NAMES = dict(place="장소명", pipe_id="관로ID", truth_depth_mm="실측 수심[mm]", truth_v_mean_mps="실측 평균유속[m/s]",
                    truth_Q_Lps="실측 유량[L/s]", note="메모")
@@ -278,11 +320,53 @@ def _local(ms):
     return (_dt.datetime.fromtimestamp(ms / 1000, _dt.timezone.utc) + _TZ).replace(tzinfo=None)
 
 
+def _monitor_rows(path):
+    """정기 기록 폴더 → (정기기록목록 1행, 정기기록 행들)"""
+    sid, folder = session_id(path)
+    m = json.load(open(os.path.join(path, "monitor.json"), encoding="utf-8"))
+    recs = []
+    p_csv = os.path.join(path, "records.csv")
+    if os.path.exists(p_csv):
+        with open(p_csv, encoding="utf-8") as f:
+            recs = list(csv.DictReader(f))
+    yes = lambda v: "예" if str(v) in ("1", "true", "True") else "아니오"
+    rows = []
+    for r in recs:
+        t = _num(r.get("epoch_ms"))
+        ok = str(r.get("ok")) == "1"
+        rows.append(dict(id=sid, t=_local(t).replace(microsecond=0) if t else None, place=m.get("place"),
+                         pipe_id=m.get("pipe_id"), ok=yes(r.get("ok")),
+                         depth_mm=_num(r.get("depth_mm")) if ok else None, fill_pct=_num(r.get("fill_pct")) if ok else None,
+                         conf=_num(r.get("confidence")), brightness=_num(r.get("brightness")), torch=yes(r.get("torch")),
+                         battery=_num(r.get("battery_pct")), charging=yes(r.get("charging")),
+                         image=(folder + "/" + r["image"]) if r.get("image") else None, note=r.get("note") or None))
+    depths = [r["depth_mm"] for r in rows if r["depth_mm"] is not None]
+    loc = m.get("location") or {}
+    st = {"running": "진행 중", "finished": "끝남", "stopped": "중지함"}.get(m.get("status"), m.get("status"))
+    series = dict(id=sid, place=m.get("place"), pipe_id=m.get("pipe_id"), lat=_num(loc.get("lat")), lon=_num(loc.get("lon")),
+                  start=_local(m["start_ms"]).replace(microsecond=0) if m.get("start_ms") else None,
+                  end=_local(m["end_ms"]).replace(microsecond=0) if m.get("end_ms") else None,
+                  interval=m.get("interval_min"), n=len(rows), n_ok=len(depths), status=st,
+                  diameter_mm=_num((m.get("params") or {}).get("diameter_mm")),
+                  calib_depth=_num((m.get("calibration") or {}).get("depth_mm")),
+                  depth_min=min(depths) if depths else None, depth_max=max(depths) if depths else None,
+                  depth_mean=sum(depths) / len(depths) if depths else None,
+                  app_version=m.get("app_version"), folder=folder)
+    return series, rows
+
+
 def collect(paths):
-    """측정 폴더 경로들 → 시트별 행 목록 (측정ID 순)"""
+    """측정 폴더 경로들 → 시트별 행 목록 (측정ID 순, 정기기록은 기록ID·시각 순)"""
     data = {name: [] for name, _ in SHEETS}
     errors = []
     for p in paths:
+        if os.path.exists(os.path.join(p, "monitor.json")):
+            try:
+                s, rr = _monitor_rows(p)
+                data["정기기록목록"].append(s); data["정기기록"] += rr
+            except Exception as e:
+                errors.append(f"{os.path.basename(p)}: {type(e).__name__}: {e}")
+            continue
         try:
             s, c, pr, ca, h = _rows_for(p)
         except Exception as e:      # 손상된 측정 하나 때문에 전체가 실패하지 않게
@@ -291,9 +375,51 @@ def collect(paths):
         data["측정요약"].append(s); data["자동vs수정"] += c; data["유속분포"] += pr
         data["촬영조건"].append(ca); data["입력이력"] += h
     for name, cols in SHEETS:
-        data[name].sort(key=lambda r: str(r.get("id")))
+        data[name].sort(key=lambda r: (str(r.get("id")), str(r.get("t") or "")))
         _round_rows(data[name], cols)
     return data, errors
+
+
+def _monitor_charts(wb, recs):
+    """정기 기록마다 시간 → 수심 꺾은선 (정기기록 시트의 행을 그대로 참조, 실패는 빈칸이라 선이 끊김)"""
+    if not recs:
+        return
+    from openpyxl.chart import Reference, ScatterChart, Series
+    ws = wb.create_sheet("정기기록그래프")
+    ws["A1"] = "정기 기록별 수심 변화 (원본 값: 정기기록 시트)"
+    keys = [c[0] for c in MONITOR_RECS]
+    ct, cd = keys.index("t") + 1, keys.index("depth_mm") + 1
+    src = wb["정기기록"]
+    start = 0
+    row = 3
+    groups = []
+    for i in range(1, len(recs) + 1):
+        if i == len(recs) or recs[i]["id"] != recs[start]["id"]:
+            groups.append((recs[start], start + 2, i + 1))       # 시트 행 번호 (머리글 1행)
+            start = i
+    for first, r0, r1 in groups[:30]:
+        ch = ScatterChart()
+        ch.title = f'{first.get("place") or ""} / {first.get("pipe_id") or ""}'
+        ch.style = 13
+        ch.height, ch.width = 7.5, 24
+        ch.x_axis.title = "시각"
+        ch.y_axis.title = "수심 (mm)"
+        ch.x_axis.number_format = "mm-dd hh:mm"
+        ch.x_axis.majorTimeUnit = "days"
+        ch.legend = None
+        xs = Reference(src, min_col=ct, min_row=r0, max_row=r1)
+        ys = Reference(src, min_col=cd, min_row=r0, max_row=r1)
+        se = Series(ys, xs, title="수심")
+        se.marker.symbol = "none"
+        se.smooth = False
+        ch.series.append(se)
+        ch.x_axis.delete = False
+        ch.y_axis.delete = False
+        ws.add_chart(ch, f"A{row}")
+        ws.cell(row - 1, 1).value = first["id"]
+        row += 17
+    if len(groups) > 30:
+        ws.cell(row, 1).value = f"그래프는 30건까지 (전체 {len(groups)}건)"
 
 
 def write_xlsx(paths, out_path, created_by="", csv_dir=None):
@@ -340,10 +466,16 @@ def write_xlsx(paths, out_path, created_by="", csv_dir=None):
             ws.conditional_formatting.add(f"{cc}2:{cc}{last}", CellIsRule(operator="equal", formula=['"예"'], fill=yellow))
             cf = get_column_letter(keys.index("conf") + 1)
             ws.conditional_formatting.add(f"{cf}2:{cf}{last}", FormulaRule(formula=[f'AND(ISNUMBER({cf}2),{cf}2<0.5)'], fill=red))
+        if name == "정기기록" and n:
+            co = get_column_letter(keys.index("ok") + 1)
+            ws.conditional_formatting.add(f"{co}2:{co}{n + 1}", CellIsRule(
+                operator="equal", formula=['"아니오"'], fill=PatternFill("solid", start_color="F8CBAD", end_color="F8CBAD")))
         if name == "촬영조건" and n:
             ci = get_column_letter(keys.index("integrity") + 1)
             ws.conditional_formatting.add(f"{ci}2:{ci}{n + 1}", FormulaRule(
                 formula=[f'LEFT({ci}2,3)="불일치"'], fill=PatternFill("solid", start_color="F8CBAD", end_color="F8CBAD")))
+
+    _monitor_charts(wb, data["정기기록"])
 
     ws = wb.create_sheet("데이터사전")
     ws.append(["시트", "열", "단위", "영문 키", "설명", "추가된 양식 버전"])
@@ -362,6 +494,7 @@ def write_xlsx(paths, out_path, created_by="", csv_dir=None):
             ("만든 곳", created_by), ("측정 건수", len(data["측정요약"])),
             ("기간 시작", min(dates) if dates else None), ("기간 끝", max(dates) if dates else None),
             ("고친 측정", sum(1 for r in data["측정요약"] if r["corrected"] == "예")),
+            ("정기 기록", f'{len(data["정기기록목록"])}건 (기록 시각 {len(data["정기기록"])}개)'),
             ("실측값 있는 측정", sum(1 for r in data["측정요약"] if r.get("truth_depth") is not None
                                     or r.get("truth_v") is not None or r.get("truth_q") is not None)),
             ("읽지 못한 측정", "; ".join(errors) or "없음"),

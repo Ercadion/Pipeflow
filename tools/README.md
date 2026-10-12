@@ -53,6 +53,7 @@ python tools/export_excel.py devdata 받은zip들/*.zip --out all.xlsx --csv csv
 python tools/export_excel.py devdata --since 20261001 --until 20261031 --out 10월.xlsx
 ```
 - 같은 측정ID 는 한 번만. 열 설명은 엑셀의 '데이터사전' 시트
+- 정기 기록(고정 설치) 폴더도 함께: 정기기록목록 · 정기기록 · 정기기록그래프 시트
 
 ## 5. 학습 데이터 표
 ```

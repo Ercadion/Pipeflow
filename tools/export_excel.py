@@ -20,7 +20,7 @@ import pipeflow_export as PE      # noqa: E402
 def find(base):
     out = []
     for dp, dns, fns in os.walk(base):
-        if "meta.json" in fns:
+        if "meta.json" in fns or "monitor.json" in fns:
             out.append(dp)
             dns[:] = []
         dns.sort()
